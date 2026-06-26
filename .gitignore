@@ -1,0 +1,32 @@
+# Secrets / environment
+.env
+.env.*
+!.env.example
+*.secret
+
+# TLS material (issued at deploy time; never commit)
+certs/
+letsencrypt/
+*.pem
+*.key
+*.crt
+
+# Runtime data / volumes
+data/
+volumes/
+*.sqlite
+*.db
+
+# Logs
+*.log
+logs/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS cruft
+.DS_Store
+Thumbs.db

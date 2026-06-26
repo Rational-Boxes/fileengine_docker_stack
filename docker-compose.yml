@@ -1,0 +1,123 @@
+# FileEngine Core — development stack
+#
+# Brings up FileEngine together with the two backing services it expects per
+# rpms/fileengine/.env: PostgreSQL and MinIO (S3). Configuration is passed to
+# the server through environment variables (config source #4 in
+# rpms/fileengine/CONFIGURATION.md), with hostnames/ports rewritten for the
+# compose network. Secrets/tunables come from the sibling .env file.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      # ':Z' relabels the bind mount for SELinux (required on Fedora).
+      - ./pgdata:/var/lib/postgresql/data:Z
+    ports:
+      # Host 5434 mirrors the dev .env (FILEENGINE_PG_PORT=5434); the container
+      # still listens on the standard 5432 inside the compose network.
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      # The dev .env S3 access/secret keys are used as the MinIO root creds so
+      # FileEngine can authenticate with the exact keys from rpms/fileengine/.env.
+      MINIO_ROOT_USER: ${FILEENGINE_S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${FILEENGINE_S3_SECRET_KEY}
+    volumes:
+      # ':Z' relabels the bind mount for SELinux (required on Fedora).
+      - ./miniodata:/data:Z
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # MinIO console
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # One-shot job: create the bucket FileEngine syncs to.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 '${FILEENGINE_S3_ACCESS_KEY}' '${FILEENGINE_S3_SECRET_KEY}' &&
+      mc mb --ignore-existing local/${FILEENGINE_S3_BUCKET} &&
+      echo 'bucket ${FILEENGINE_S3_BUCKET} ready'
+      "
+    restart: "no"
+
+  fileengine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      # --- Database (PostgreSQL) ---
+      FILEENGINE_PG_HOST: postgres
+      FILEENGINE_PG_PORT: "5432"
+      FILEENGINE_PG_DATABASE: ${POSTGRES_DB}
+      FILEENGINE_PG_USER: ${POSTGRES_USER}
+      FILEENGINE_PG_PASSWORD: ${POSTGRES_PASSWORD}
+
+      # --- Local storage ---
+      FILEENGINE_STORAGE_BASE: /var/lib/fileengine/storage
+
+      # --- Encryption & compression at rest (dev .env) ---
+      FILEENGINE_ENCRYPT_DATA: "true"
+      FILEENGINE_COMPRESS_DATA: "true"
+      AT_REST_KEY: ${AT_REST_KEY}
+
+      # --- Object store (MinIO) ---
+      FILEENGINE_S3_ENDPOINT: http://minio:9000
+      FILEENGINE_S3_REGION: ${FILEENGINE_S3_REGION}
+      FILEENGINE_S3_BUCKET: ${FILEENGINE_S3_BUCKET}
+      FILEENGINE_S3_ACCESS_KEY: ${FILEENGINE_S3_ACCESS_KEY}
+      FILEENGINE_S3_SECRET_KEY: ${FILEENGINE_S3_SECRET_KEY}
+      FILEENGINE_S3_PATH_STYLE: "true"
+      # dev .env used the (unparsed) FILEENGINE_S3_SUPPORT=minio; the active key
+      # is FILEENGINE_S3_SYNC_SUPPORT, which also accepts the "minio" alias.
+      FILEENGINE_S3_SYNC_SUPPORT: minio
+      FILEENGINE_S3_RETRY_SECONDS: "60"
+
+      # --- gRPC server ---
+      FILEENGINE_GRPC_HOST: 0.0.0.0
+      FILEENGINE_GRPC_PORT: "50051"
+      FILEENGINE_HTTP_THREAD_POOL: "10"
+
+      # --- Monitoring REST listener ---
+      # Bound to 0.0.0.0 (not the dev 127.0.0.1) so it is reachable from the
+      # host and for the container healthcheck.
+      FILEENGINE_HTTP_METRICS_ADDR: 0.0.0.0
+      FILEENGINE_HTTP_METRICS_PORT: "8081"
+
+      # --- Logging (dev .env: debug, console only) ---
+      FILEENGINE_LOG_LEVEL: debug
+      FILEENGINE_LOG_TO_CONSOLE: "true"
+      FILEENGINE_LOG_TO_FILE: "false"
+    volumes:
+      # FileEngine local file cache / storage base (FILEENGINE_STORAGE_BASE),
+      # persisted to ./filecache in the project. ':Z' relabels for SELinux.
+      - ./filecache:/var/lib/fileengine/storage:Z
+    ports:
+      - "50051:50051"   # gRPC API
+      - "8081:8081"     # monitoring / health REST listener
