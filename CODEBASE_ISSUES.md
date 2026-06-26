@@ -98,16 +98,21 @@ the same constraint already applies to the auto-created `tenant_<tenant>` schema
 This fits the existing `extractTenantFromHost`. Validate the resolved tenant
 against the authenticated user's LDAP membership.
 
-### BRIDGE-1 🟦 — Confirm all wiring is env-configurable
-Verify core gRPC address/port, listen ports, `HTTP_CORS_ORIGIN` /
-`CSAI`-facing CORS, `HTTP_MAX_BODY_BYTES`, LDAP server URL, and bind credentials
-are all settable via env (for compose service hostnames). Most already are;
-confirm and fill any gaps.
+### BRIDGE-1 ✅ — All wiring is env-configurable (verified)
+Confirmed in Phase 3: both bridges read everything from env —
+`FILEENGINE_GRPC_HOST/PORT`, `HTTP_HOST/PORT/MONITORING_PORT`, `WEBDAV_HOST/PORT/
+MONITORING_PORT`, `HTTP_CORS_ORIGIN`, `HTTP_MAX_BODY_BYTES`, `HTTP_THREAD_POOL`,
+the `FILEENGINE_LDAP_*` set, and `OAUTH_*`/`TOKEN_TTL_SECONDS`. No Postgres
+(the PG keys in the repos' `.env` are vestigial — the bridges don't link libpq).
+Compose wires them to service hostnames.
 
-### BRIDGE-2 🟦 — Health endpoints & console logging
-`http-bridge` exposes `/healthz` / `/readyz`. Confirm `webdav-bridge` exposes a
-health endpoint for the compose healthcheck (add if missing), and that both log
-to stdout.
+### BRIDGE-2 ✅ — Health endpoints & console logging (verified)
+Both bridges expose `/healthz` `/readyz` `/poolz` on a monitoring listener
+(http `:8091`, webdav `:8089`), and **http-bridge's main-port `/readyz` does a
+real gRPC `ListDirectory` to the core** (verified `{"status":"ready"}`). Console
+logging via `LOG_WRITE_TO_CONSOLE=true` captured by `docker logs`. *(The compose
+healthchecks currently use a bash `/dev/tcp` liveness probe since the images have
+no curl; switching them to `/readyz` would require adding curl — optional.)*
 
 ---
 

@@ -519,7 +519,15 @@ docker_unified/
    verifies schema, connects to S3, and logs **"Redis event emission enabled ->
    redis:6379"** — all services healthy.
 3. **App layer** — core, http-bridge, webdav-bridge images + compose wiring;
-   internal gRPC; verify upload/download/streaming.
+   internal gRPC; verify upload/download/streaming. ✅
+   *Done:* `images/http-bridge/` + `images/webdav-bridge/` (RPM-based on the
+   shared base; standalone — no fileengine-libs/Postgres; run as `nobody`) wired
+   into compose `depends_on: core(healthy)` with internal gRPC + LDAP/CORS env.
+   Verified up: both bridges listen (http 8090, webdav 8088) and **http-bridge
+   `/readyz` returns ready** — it performs a real gRPC `ListDirectory` against the
+   core, confirming the bridge↔core path end-to-end (the same plumbing
+   upload/download stream over). The **authenticated** upload/download/streaming
+   test needs an LDAP-issued token, so it rides with Phase 4 (LDAP).
 4. **LDAP** — 389-ds (`389ds/dirsrv`) + seed LDIFs/`dsconf` (uid=email,
    tenants/role groups) + web console; align the bridges' LDAP config to
    `ou=tenants` (LDAP-1); verify login → tenant + roles.
