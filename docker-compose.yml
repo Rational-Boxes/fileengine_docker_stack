@@ -103,7 +103,7 @@ services:
     restart: "no"
 
   core:
-    image: fileengine-core:${VERSION:-1.0.0}
+    image: fileengine-core:${VERSION:-1.1.0}
     build:
       context: .
       dockerfile: images/core/Dockerfile
@@ -156,7 +156,7 @@ services:
   # REST/auth proxy over the gRPC core (serves the SPA's /api). Internal only;
   # nginx (a later phase) terminates TLS and reverse-proxies to it.
   http-bridge:
-    image: fileengine-http-bridge:${VERSION:-1.0.0}
+    image: fileengine-http-bridge:${VERSION:-1.1.0}
     build:
       context: .
       dockerfile: images/http-bridge/Dockerfile
@@ -193,7 +193,7 @@ services:
   # WebDAV gateway over the gRPC core. Internal only; nginx routes the
   # <tenant>-drive.<base> vhost here.
   webdav-bridge:
-    image: fileengine-webdav-bridge:${VERSION:-1.0.0}
+    image: fileengine-webdav-bridge:${VERSION:-1.1.0}
     build:
       context: .
       dockerfile: images/webdav-bridge/Dockerfile
@@ -256,7 +256,7 @@ services:
 
   # CSAI HTTP app — search, RAG chat, document text/preview (serves the SPA /csai).
   csai-app:
-    image: fileengine-csai:${VERSION:-1.0.0}
+    image: fileengine-csai:${VERSION:-1.1.0}
     build:
       context: images/csai
       dockerfile: Dockerfile
@@ -320,7 +320,7 @@ services:
   # CSAI worker — consumes file events from Redis, converts + indexes (renditions
   # + pgvector). Same image, different command.
   csai-worker:
-    image: fileengine-csai:${VERSION:-1.0.0}
+    image: fileengine-csai:${VERSION:-1.1.0}
     depends_on:
       core:
         condition: service_healthy
@@ -340,7 +340,7 @@ services:
   # Model Context Protocol server (Streamable-HTTP) for AI agents. Reaches the
   # core over gRPC; per-request auth against LDAP; tenant from Host/X-Tenant.
   mcp:
-    image: fileengine-mcp:${VERSION:-1.0.0}
+    image: fileengine-mcp:${VERSION:-1.1.0}
     build:
       context: images/mcp
       dockerfile: Dockerfile
@@ -376,7 +376,7 @@ services:
   # nginx — TLS termination, SPA serving, per-tenant subdomain routing. The ONLY
   # service that publishes host ports.
   nginx:
-    image: fileengine-nginx:${VERSION:-1.0.0}
+    image: fileengine-nginx:${VERSION:-1.1.0}
     build:
       context: images/nginx
       dockerfile: Dockerfile

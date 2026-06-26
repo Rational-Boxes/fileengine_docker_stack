@@ -3,7 +3,7 @@
 # Standalone binary (gRPC++/protobuf/Poco/OpenLDAP from the Fedora repos; no
 # fileengine-libs, no Postgres). Tenant is resolved from the request Host
 # (<tenant>-drive.<base>); auth is per-request against LDAP.
-FROM fileengine-base:1.0.0
+FROM fileengine-base:1.1.0
 
 COPY rpms/fileengine/fileengine-webdav-bridge-*.rpm /tmp/rpms/
 RUN set -eux; \
