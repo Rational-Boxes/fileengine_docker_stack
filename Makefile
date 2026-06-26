@@ -19,7 +19,17 @@ HTTP_DIR     := $(ROOT)/http_bridge
 WEBDAV_DIR   := $(ROOT)/webdav_bridge
 FRONTEND_DIR := $(ROOT)/frontend
 
-VERSION  ?= 1.0.0
+# Stack release version — tags the built images (fileengine-*:$(VERSION)) and the
+# shared base image. Independent of the component RPM versions below.
+VERSION  ?= 1.1.0
+
+# Per-component RPM versions. The source repos version independently (core moved
+# to 2.x; the bridges are on 1.x), so each is selected separately when staging.
+# Override on the command line if you build a different point release.
+CORE_VERSION   ?= 2.1.0
+HTTP_VERSION   ?= 1.1.0
+WEBDAV_VERSION ?= 1.1.0
+
 RPM_ROOT := $(HOME)/rpmbuild/RPMS
 
 # Staging locations inside docker_unified/.
@@ -36,11 +46,11 @@ BASE_DOMAIN ?=
 BASE_IMAGE ?= fileengine-base:$(VERSION)
 
 # Copy the newest RPM matching <pkg>-<version>-*.rpm from any RPMS arch dir into
-# the staging dir. $(1) = package name. Fails loudly if the package is missing.
+# the staging dir. $(1) = package name, $(2) = version. Fails loudly if missing.
 define stage_rpm
-	f=$$(find $(RPM_ROOT) -name "$(1)-$(VERSION)-*.rpm" ! -name "*debuginfo*" ! -name "*debugsource*" \
+	f=$$(find $(RPM_ROOT) -name "$(1)-$(2)-*.rpm" ! -name "*debuginfo*" ! -name "*debugsource*" \
 	      -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-); \
-	if [ -z "$$f" ]; then echo "  !! missing RPM: $(1)-$(VERSION)"; exit 1; fi; \
+	if [ -z "$$f" ]; then echo "  !! missing RPM: $(1)-$(2)"; exit 1; fi; \
 	cp -v "$$f" $(RPMS_DIR)/;
 endef
 
@@ -71,19 +81,19 @@ rpm-core:
 	@echo "==> building core RPMs (events ON) from $(CORE_DIR)"
 	$(MAKE) -C $(CORE_DIR) rpm-package
 	@mkdir -p $(RPMS_DIR)
-	@set -e; $(call stage_rpm,fileengine-libs) $(call stage_rpm,fileengine-server) $(call stage_rpm,fileengine-cli)
+	@set -e; $(call stage_rpm,fileengine-libs,$(CORE_VERSION)) $(call stage_rpm,fileengine-server,$(CORE_VERSION)) $(call stage_rpm,fileengine-cli,$(CORE_VERSION))
 
 rpm-http:
 	@echo "==> building http-bridge RPM from $(HTTP_DIR)"
 	$(MAKE) -C $(HTTP_DIR) rpm-package
 	@mkdir -p $(RPMS_DIR)
-	@set -e; $(call stage_rpm,fileengine-http-bridge)
+	@set -e; $(call stage_rpm,fileengine-http-bridge,$(HTTP_VERSION))
 
 rpm-webdav:
 	@echo "==> building webdav-bridge RPM from $(WEBDAV_DIR)"
 	$(MAKE) -C $(WEBDAV_DIR) rpm-package
 	@mkdir -p $(RPMS_DIR)
-	@set -e; $(call stage_rpm,fileengine-webdav-bridge)
+	@set -e; $(call stage_rpm,fileengine-webdav-bridge,$(WEBDAV_VERSION))
 
 # --- SPA -------------------------------------------------------------------
 
