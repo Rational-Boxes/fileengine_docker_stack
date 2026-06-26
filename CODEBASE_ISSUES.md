@@ -10,15 +10,17 @@ Source-code / packaging changes required in the main repos to support the unifie
 
 ## file_engine_core
 
-### CORE-1 🟥 — Build the core RPM with Redis events enabled
-`fileengine-core.spec`'s `%build` does **not** pass `-DFILEENGINE_ENABLE_EVENTS=ON`,
-so the packaged binary has event emission compiled out (no `hiredis` link). The
-unified stack relies on the core publishing `fileengine:events` for automatic
-preview/rendition generation.
-- Add an events-enabled build: `-DFILEENGINE_ENABLE_EVENTS=ON`,
-  `BuildRequires: hiredis-devel`, `Requires: hiredis` — either as the default or a
-  dedicated build flag/sub-package the image build selects.
-- (Already documented in `file_engine_core/CONFIGURATION.md`.)
+### CORE-1 ✅ — Build the core RPM with Redis events enabled (done)
+`fileengine-core.spec` now builds with event emission enabled so the packaged
+server can publish `fileengine:events` for automatic preview/rendition generation:
+- `%build` cmake invocation gained **`-DFILEENGINE_ENABLE_EVENTS=ON`**.
+- **`BuildRequires: hiredis-devel`** (so CMake's `find_library(hiredis)` succeeds
+  rather than silently compiling events out with a warning).
+- **`Requires: …, hiredis`** on `fileengine-libs` for the runtime link.
+At runtime, set `FILEENGINE_EVENTS_ENABLED=true` + `FILEENGINE_REDIS_*` to turn
+emission on (documented in `file_engine_core/CONFIGURATION.md`). Note: the Debian
+(`debian/`) and Arch (`PKGBUILD`) packaging were **not** changed — the unified
+stack uses the RPM; update those too if those package paths are ever used.
 
 ### CORE-2 🟦 — Verify on-first-access tenant auto-provisioning
 By design, a new tenant is created in LDAP (`scripts/new-tenant.sh`) and the core
@@ -89,45 +91,101 @@ to stdout.
 
 ## convert_search_ai
 
-### CSAI-1 🟧 — Independent embedder vs. LLM provider configuration
-Per the decision to bundle Ollama now but "revisit the service to point the
-embedder and LLM to different providers": verify and, if needed, harden that the
-embedder and the chat LLM can target **different providers/endpoints
-independently** (today: `CSAI_EMBEDDING_*` vs `CSAI_CHAT_*`). Document the matrix
-and ensure switching one doesn't require the other.
+### CSAI-1 ✅ — Independent embedder vs. LLM provider configuration (confirmed + hardened)
+**Verified already independent and hardened.** The embedder and chat LLM are
+configured by **separate** env groups (`CSAI_EMBEDDING_*` vs `CSAI_CHAT_*`),
+resolved by **separate factory functions** with independent provider, model,
+`*_BASE_URL`, and `*_API_KEY` — so the embedder can run on CPU-local Ollama while
+chat targets an external provider, and switching one never requires the other.
+Changes made:
+- **Startup confirmation log** (`convert_search_ai/src/.../app.py`,
+  `_log_ai_config`): on boot CSAI logs `AI providers — embeddings: provider/model/
+  dim/endpoint | chat: provider/model/endpoint` (no secrets) so operators can
+  confirm the split took effect.
+- **Documented the split** as a first-class example in `convert_search_ai/.env.example`
+  (CPU-local `nomic-embed-text` embeddings + external chat).
 
 ### CSAI-2 🟧 — Tolerate Ollama startup / model-pull latency
-The bundled `ollama` service pulls `nomic-embed-text` on first run. CSAI (app +
-worker) should **retry/degrade gracefully** while Ollama is unavailable or the
-model isn't pulled yet, rather than failing conversions/queries permanently.
+The one-shot **`ollama-init`** service pulls `nomic-embed-text` on first startup
+(see IMPLEMENTATION_PLAN §11), and CSAI `depends_on` its completion — but CSAI
+(app + worker) should still **retry/degrade gracefully** if Ollama is briefly
+unavailable or warming up, rather than failing conversions/queries permanently.
 
 ### CSAI-3 🟦 — Health endpoint
 Confirm CSAI exposes a `/health` (or similar) endpoint for the compose
 healthcheck.
 
+### CSAI-4 🟧 — Install the full conversion toolchain (no silent degradation)
+CSAI **degrades silently** when a conversion dependency is missing —
+`tools.have(...)` guards, lazy imports, and the PDF-backend chain
+(`docling → pymupdf4llm → pdfplumber → pdftotext`) all fall through, so a partial
+install quietly drops preview/extraction fidelity rather than erroring. The
+`fileengine-csai` image must install the **full set** (see IMPLEMENTATION_PLAN §3.1):
+- **System tools:** LibreOffice, poppler-utils (`pdftoppm`+`pdftotext`), ImageMagick,
+  ffmpeg (with **libopenh264**+**libvpx** encoders), libmagic.
+- **Python backends:** `convert_search_ai[pdf,pdf-docling,pdf-pymupdf]`.
+Two deliberate caveats the operator may weigh: **docling** pulls ML models (image
+size), and **pymupdf4llm/PyMuPDF is AGPL-3.0** (license-sensitive sites may omit
+that one extra — the chain still works via docling/pdfplumber/pdftotext). Everything
+else ships by default. *(Image/packaging concern, not a code change.)*
+
+---
+
+## fileengine-mcp
+
+### MCP-1 🟦 — Health/readiness endpoint
+The MCP HTTP server has no dedicated health endpoint; `/mcp` and `/whoami` return
+401 unauthenticated. For a clean compose healthcheck, add a small unauthenticated
+`/healthz` (or `/readyz` that reports core-gRPC + LDAP reachability). Until then
+the healthcheck is a TCP/HTTP liveness probe on `:8089`.
+
+### MCP-2 🟧 — Tenant-from-Host behind the reverse proxy + clean path prefix
+MCP is served at `<tenant>.<base>/mcp` and resolves the tenant from the Host
+subdomain's **first label** (or an explicit `X-Tenant`), so nginx must
+**pass the original Host through** (`proxy_set_header Host $host`) for tenancy to
+work. Two things to confirm/handle when finalizing the vhost:
+- the Streamable-HTTP endpoint is reachable cleanly at `/mcp` while its helper
+  routes (`/auth/token`, `/whoami`) sit under the same prefix — map locations so
+  the public paths are unambiguous (consider honoring `X-Forwarded-Prefix`);
+- MCP's `extract_tenant` takes the **whole** first label, so a dedicated
+  `<tenant>-mcp.<base>` subdomain would mis-resolve (`someco-mcp`) — that's why the
+  **path** `/mcp` was chosen; if a dedicated MCP subdomain is ever wanted, MCP must
+  hyphen-split the host like the WebDAV bridge (LDAP-2).
+
+### MCP-3 🟦 — Tool-exposure policy defaults for the deployment
+Confirm the deployment sets a sensible policy via `MCP_*`: writes on,
+**delete off** (`MCP_ALLOW_DELETE=0`, the default), per-call size caps
+(`MCP_MAX_READ_BYTES`/`MCP_MAX_WRITE_BYTES`/`MCP_MAX_RESULTS`), and optionally
+`MCP_READ_ONLY=1` or an `MCP_SUBTREE_ALLOWLIST` sandbox for untrusted agents.
+
 ---
 
 ## frontend
 
-### FE-1 🟥 — Verify same-origin / path-prefixed reverse-proxy operation
-The SPA must work built with `VITE_API_BASE=/api` and `VITE_CSAI_BASE=/csai`
-(relative, same-origin) behind nginx. Verify the flows that touch absolute URLs
-or special transfer modes:
+### FE-1 🟧 — Same-origin / path-prefixed reverse-proxy operation (wired; flows to verify)
+**Done:** the SPA now supports same-origin path bases behind nginx —
+**`.env.production`** sets `VITE_API_BASE=/api` and `VITE_CSAI_BASE=/csai`, and
+`csaiClient.chatSocketUrl()` resolves a **relative** base against
+`window.location` (picking `ws`/`wss` from the page) so the chat WebSocket works
+on `/csai`. The api/auth clients already use `${BASE}/v1/...` (relative-safe) and
+OAuth `return_to` already builds from `window.location.origin` (public origin, no
+hard-coded localhost). **Still to verify end-to-end behind the real proxy:**
 - blob downloads and **Range requests** (PDF/video inline preview),
 - chunked/streaming upload + download through `/api`,
-- WebDAV-served content if referenced,
-- OAuth `return_to` URL construction (must resolve to the public origin, not a
-  hard-coded `localhost`).
+- WebDAV-served content if referenced.
 
-### FE-2 🟧 — SPA: select the active tenant from the subdomain
-The SPA is served per-tenant at `<tenant>.<base>`. On load it must **derive the
-active tenant from the hostname** (the subdomain label) and set it as the active
-tenant / `X-Tenant`, rather than relying solely on the in-app selector. A user
-with access to multiple tenants switches by visiting another tenant's subdomain;
-the selector stays for convenience but defaults to the subdomain's tenant. Handle
-the apex / non-tenant host (redirect to a default tenant or a chooser). The
-http-bridge may optionally validate that a request's `X-Tenant` matches the host
-subdomain.
+### FE-2 ✅ — SPA: select the active tenant from the subdomain (done)
+The SPA derives the active tenant from the hostname. New
+`frontend/src/utils/tenantHost.ts` parses `<tenant>.<base>` using
+**`VITE_BASE_DOMAIN`**; `auth.initTenantFromHost()` (called first in `App.vue`
+bootstrap) adopts it as the active tenant — set **before** `whoami()` so the
+`X-Tenant` header and tenant listing are scoped correctly — overriding any
+persisted selection. The apex / non-tenant host (and `localhost` dev, where
+`VITE_BASE_DOMAIN` is empty) falls back to the persisted/selected tenant. The
+`TenantSelector` now **navigates to the chosen tenant's subdomain** (each tenant
+is its own origin) when subdomain tenancy is enabled, else does the in-app swap.
+Reserved labels (`www`/`app`/`api`/`csai`) are ignored. Optional follow-up: the
+http-bridge may validate that a request's `X-Tenant` matches the host subdomain.
 
 ---
 

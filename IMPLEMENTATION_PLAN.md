@@ -31,16 +31,16 @@ the host IP, and obtains TLS automatically via Let's Encrypt.
                         ┌──────────────────┐
                         │      nginx       │  TLS termination (LE wildcard *.base,
                         │  SPA + reverse   │  DNS-01); routes by tenant subdomain:
-                        │  proxy + certbot │  <t>.base → SPA+/api+/csai;
+                        │  proxy + certbot │  <t>.base → SPA+/api+/csai+/mcp;
                         └──────────────────┘  <t>-drive.base → webdav
-       <t>.base /api │     <t>.base /csai │    <t>-drive.base │   <t>.base / (SPA)
-                 ▼                 ▼                     ▼
-        ┌─────────────┐   ┌──────────────┐     ┌────────────────┐
-        │ http-bridge │   │  csai-app    │     │ webdav-bridge  │
-        └─────────────┘   └──────────────┘     └────────────────┘
-                 │   gRPC :50051 (internal only)        │
+   <t>.base /api │  /csai │  /mcp │   <t>-drive.base │   <t>.base / (SPA)
+                 ▼        ▼       ▼              ▼
+        ┌─────────────┐ ┌──────────┐ ┌───────┐ ┌────────────────┐
+        │ http-bridge │ │ csai-app │ │  mcp  │ │ webdav-bridge  │
+        └─────────────┘ └──────────┘ └───────┘ └────────────────┘
+                 │       gRPC :50051 (internal only)     │
                  └───────────────┬──────────────────────┘
-                                 ▼
+                                 ▼   (mcp also → core gRPC + LDAP)
                           ┌─────────────┐        ┌──────────────┐
                           │    core     │◀──────▶│  csai-worker │ (ingest)
                           │  (gRPC)     │  events│              │
@@ -72,6 +72,7 @@ images share a common Fedora base layer with the provided AWS SDK RPMs installed
 | `webdav-bridge` | `fileengine-webdav-bridge`| Fedora + `fileengine-webdav-bridge` RPM                                           | `8088` |
 | `csai-app`      | `fileengine-csai`         | Fedora + Python + `convert_search_ai` + conversion tools                          | `8092` |
 | `csai-worker`   | `fileengine-csai`         | (same image as `csai-app`, command = ingest worker)                              | — |
+| `mcp`           | `fileengine-mcp`          | Python + `python_interface` client + `fileengine-mcp` (Streamable-HTTP MCP server for AI agents) | `8089` |
 | `nginx`         | `fileengine-nginx`        | nginx + certbot + **built SPA** + rendered vhost config                          | `80`, `443` |
 | `postgres`      | `pgvector/pgvector:pg16`  | Postgres 16 with the `vector` extension (CSAI requires it)                       | `5432` |
 | `redis`         | `redis:7`                 | password-protected (core events + CSAI)                                          | `6379` |
@@ -80,12 +81,47 @@ images share a common Fedora base layer with the provided AWS SDK RPMs installed
 
 > `csai-app` and `csai-worker` are **two services from one image**, differing only
 > in `command` (FastAPI app vs. `python -m convert_search_ai.ingest`).
+>
+> `mcp` runs the **HTTP transport** (`fileengine-mcp-http`, binds `:8089`), not the
+> stdio variant — so it is a long-lived service reachable through nginx. Like CSAI
+> it reaches the **core over gRPC** and authenticates against **LDAP** per request;
+> it needs no Postgres/Redis. It is **already tenant-aware** (resolves the tenant
+> from an explicit `X-Tenant` header, else the Host subdomain's first label).
 
 ### 3.1 Conversion tooling (in `fileengine-csai`)
-Required for renditions/previews: **LibreOffice** (office→pdf), **poppler-utils**
-(`pdftoppm`), **ImageMagick** (image thumbnails), **ffmpeg with libvpx +
-libopenh264** (video poster + WebM/VP9 preview clip). These add significant
-image size but are mandatory for the preview pipeline.
+
+Renditions/previews and PDF→Markdown extraction need **both system tools and
+Python backends**. CSAI **degrades silently** when a dependency is missing
+(`tools.have(...)` guards, lazy imports, and the PDF-backend chain falls through),
+so a partial install quietly drops fidelity rather than erroring. The image
+therefore installs the **full set** so nothing degrades unnoticed.
+
+**System packages** (invoked via `subprocess`):
+
+| Tool (pkg) | Used for |
+|------------|----------|
+| **LibreOffice** (`libreoffice`/`soffice`) | office (doc/xls/ppt…) → PDF |
+| **poppler-utils** (`pdftoppm`, `pdftotext`) | PDF → page-1 preview PNG; last-resort PDF text |
+| **ImageMagick** (`magick`/`convert`) | image thumbnails |
+| **ffmpeg** (with **libopenh264** + **libvpx**) | video poster frame + WebM/VP9 preview clip (the `ffmpeg-free` build ships libopenh264, not libx264 — CSAI picks the available encoder) |
+| **libmagic** (`file`/`python-magic`) | MIME sniffing |
+
+**Python PDF→Markdown backends** — CSAI installs with the conversion extras so
+the full fidelity-ordered chain works (`DEFAULT_ORDER = docling, pymupdf4llm,
+pdfplumber, pdftotext`):
+
+| Extra | Package | Notes |
+|-------|---------|-------|
+| `pdf` | `pdfplumber` | MIT, light — solid tables (baseline) |
+| `pdf-docling` | `docling` | MIT, **heavy (ML models)** — best structure/tables; largest image cost |
+| `pdf-pymupdf` | `pymupdf4llm` | **PyMuPDF is AGPL-3.0** — license-sensitive deployments may omit this extra (the chain still works via docling/pdfplumber/pdftotext) |
+
+> Build installs `convert_search_ai[pdf,pdf-docling,pdf-pymupdf]` plus the AI
+> provider extras a deployment uses (`anthropic`/`openai`/`voyage`). The two
+> caveats — **docling's ML download/size** and **pymupdf4llm's AGPL license** —
+> are the only reasons to trim the set; everything else is installed by default so
+> previews/extraction never silently downgrade. These add significant image size
+> but are otherwise mandatory for the preview/extraction pipeline.
 
 ---
 
@@ -105,8 +141,17 @@ adds a **build/prepare step** (a `make`-driven script in `docker_unified/`) that
 2. **Builds the SPA**: `frontend` → `npm ci && npm run build` with
    `VITE_API_BASE=/api` and `VITE_CSAI_BASE=/csai` (same-origin), output copied
    into the `fileengine-nginx` build context.
-3. **Stages `convert_search_ai`** source (or a wheel) for the CSAI image.
-4. AWS SDK RPMs are already provided under `rpms/aws-sdk/` (v1.11.725).
+3. **Stages `convert_search_ai`** source (or a wheel) for the CSAI image; the
+   `fileengine-csai` Dockerfile installs it **with the conversion extras**
+   (`convert_search_ai[pdf,pdf-docling,pdf-pymupdf]` + chosen AI-provider extras)
+   and **all conversion system tools** (LibreOffice, poppler-utils, ImageMagick,
+   ffmpeg+libopenh264/libvpx, libmagic) — see §3.1.
+4. **Stages `mcp` + `python_interface`** for the `fileengine-mcp` image. The MCP
+   server depends on the `fileengine` Python client in `python_interface/`, so its
+   build context must include **both** repos (the existing `mcp/Dockerfile` builds
+   from the parent dir and `pip install`s `python_interface` then `mcp`). Pure
+   Python — no RPM.
+5. AWS SDK RPMs are already provided under `rpms/aws-sdk/` (v1.11.725).
 
 Each `Dockerfile` then `dnf install`s the relevant RPMs from the local `rpms/`
 directory. (Per decision, binaries come from **prebuilt RPMs**, not in-image
@@ -121,7 +166,7 @@ Two vhosts under the wildcard cert, keyed on the Host:
 | Host pattern | Routing |
 |--------------|---------|
 | `<tenant>-drive.<base>` | → `webdav-bridge:8088` (WebDAV); the bridge resolves the tenant as the **first `-`-delimited segment** of the host label (`someco-drive` → `someco`) |
-| `*.<base>` (any other `<tenant>.<base>`) | `/` → SPA static (`try_files … /index.html`); `/api/` → `http-bridge:8090`; `/csai/` → `csai-app:8092` |
+| `*.<base>` (any other `<tenant>.<base>`) | `/` → SPA static (`try_files … /index.html`); `/api/` → `http-bridge:8090`; `/csai/` → `csai-app:8092`; `/mcp` → `mcp:8089` |
 
 nginx server blocks:
 - a vhost matching `*-drive.<base>` → WebDAV (Host passed through; the bridge
@@ -130,6 +175,15 @@ nginx server blocks:
 
 Tenant names contain **no hyphen**, so an SPA host (`<tenant>.<base>`, no hyphen
 in the label) never collides with a WebDAV host (`<tenant>-drive.<base>`).
+
+**MCP** is served at **`<tenant>.<base>/mcp`** (the Streamable-HTTP endpoint), with
+its helper routes (`/auth/token`, `/whoami`) under the same prefix; nginx passes
+the Host through so the MCP server resolves the tenant from the subdomain (or an
+explicit `X-Tenant`) — no hyphen-split needed, since the tenant label is bare. A
+dedicated `<tenant>-mcp.<base>` subdomain was **not** chosen: it would require the
+MCP server to hyphen-split the host like WebDAV (it currently takes the whole
+first label), whereas the same-origin `/mcp` path reuses the existing routing and
+MCP's existing tenant logic unchanged.
 
 Key settings:
 - `client_max_body_size` large + `proxy_request_buffering off` /
@@ -279,12 +333,17 @@ All configuration is **operator-provided** (no auto-generation of secrets).
 | `CSAI_AGENT_EMAIL`, `CSAI_AGENT_PASSWORD` | csai | LDAP agent identity that writes renditions/indexes |
 | `CSAI_EMBEDDING_PROVIDER/_MODEL/_BASE_URL/_API_KEY/_DIMENSION` | csai | embeddings (external/offline) |
 | `CSAI_CHAT_PROVIDER/_MODEL/_BASE_URL/_API_KEY` | csai | chat/RAG (external/offline) |
+| `MCP_AGENT_EMAIL`, `MCP_AGENT_PASSWORD` | mcp | LDAP agent identity for the stdio fallback / service bind (per-request callers auth with their own creds) |
+| `MCP_READ_ONLY`, `MCP_ALLOW_DELETE` | mcp | tool-exposure policy (default: writes on, delete **off**) |
+| `MCP_MAX_READ_BYTES`, `MCP_MAX_WRITE_BYTES`, `MCP_MAX_RESULTS` | mcp | per-call guardrails |
+| `MCP_SUBTREE_ALLOWLIST`, `MCP_TOKEN_TTL` | mcp | optional subtree sandbox; bearer-token lifetime |
 
 > Exact downstream env keys per service (e.g. `FILEENGINE_PG_*`, the bridges'
 > `LDAP_*`, `CSAI_PG_*`, `FILEENGINE_CSAI_USER/PASSWORD`, `HTTP_CORS_ORIGIN`,
-> `FILEENGINE_EVENTS_ENABLED`, etc.) are derived from these high-level inputs in
-> the compose `environment:` blocks. A full per-service env map will accompany
-> the compose file.
+> `FILEENGINE_EVENTS_ENABLED`, MCP's `FILEENGINE_GRPC_HOST/PORT`, `MCP_HTTP_HOST=0.0.0.0`,
+> and the shared `FILEENGINE_LDAP_*` bind/bases, etc.) are derived from these
+> high-level inputs in the compose `environment:` blocks. A full per-service env
+> map will accompany the compose file.
 
 ---
 
@@ -306,8 +365,42 @@ All bind/volume mounts use `:Z` (SELinux relabel) for Fedora/Podman.
 ## 11. AI provider (bundled Ollama, repointable)
 
 - A bundled **`ollama`** service (CPU) provides the embeddings model
-  **`nomic-embed-text`** (768-dim), pulled on first run. CSAI's embedder — and,
-  by default, its chat model — point at this service via `CSAI_*_BASE_URL`.
+  **`nomic-embed-text`** (768-dim). CSAI's embedder — and, by default, its chat
+  model — point at this service via `CSAI_*_BASE_URL`.
+- **First-startup model install.** A one-shot **`ollama-init`** service pulls the
+  embedding model on first boot (mirroring `minio-init`'s bucket-create pattern),
+  so initialization — not the first user request — installs the model:
+
+  ```yaml
+  ollama:
+    image: ollama/ollama
+    volumes: [ "ollama-models:/root/.ollama:Z" ]     # pulled models persist
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  ollama-init:                                         # one-shot model pull
+    image: ollama/ollama
+    depends_on:
+      ollama: { condition: service_healthy }
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      CSAI_EMBEDDING_MODEL: ${CSAI_EMBEDDING_MODEL:-nomic-embed-text}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'ollama pull "$$CSAI_EMBEDDING_MODEL" && echo "model $$CSAI_EMBEDDING_MODEL ready"'
+    restart: "no"
+  ```
+
+  The pull is **idempotent** (Ollama no-ops if the model is already in the
+  persisted `ollama-models` volume), so re-runs are cheap. CSAI (app + worker)
+  `depends_on: ollama-init (service_completed_successfully)` so it only starts
+  once the model is present — and still tolerates Ollama warm-up (CSAI-2). The
+  pulled model name is driven by `CSAI_EMBEDDING_MODEL` so the install and the
+  embedder stay in lockstep.
 - Providers stay **configurable**: the embedder and the LLM can each be
   **repointed at external services** (OpenAI-compatible/remote Ollama) by
   overriding `CSAI_EMBEDDING_*` / `CSAI_CHAT_*` independently (see CSAI-1 in
@@ -325,10 +418,13 @@ All bind/volume mounts use `:Z` (SELinux relabel) for Fedora/Podman.
 
 - `depends_on` + healthchecks sequence startup:
   `postgres`(healthy) + `ldap`(healthy) → `db-init`(completed) → `core`(healthy)
-  → bridges + `csai-app`/`csai-worker` → `nginx`.
+  → bridges + `csai-app`/`csai-worker` + `mcp` → `nginx`.
+- `mcp` depends on `core`(healthy) + `ldap`(healthy) — it binds an LDAP agent
+  identity and a gRPC connection at startup and exits if either is unreachable.
 - Healthchecks: Postgres `pg_isready`; core via the metrics listener
   (`/healthz` on `8081`); bridges via their health endpoints; CSAI via
-  `/health`; nginx via a local probe.
+  `/health`; mcp via a TCP/HTTP probe on `:8089` (a dedicated `/healthz` is a
+  small enhancement — see MCP-1); nginx via a local probe.
 - A one-shot **`db-init`** service performs migrations + default-tenant
   provisioning (idempotent; safe to re-run).
 
@@ -340,8 +436,9 @@ All bind/volume mounts use `:Z` (SELinux relabel) for Fedora/Podman.
 |-------|----------|
 | Packaging | **Unified docker-compose** (not a single image); Docker **and Podman** compatible |
 | Binaries | **Prebuilt RPMs** (core/http/webdav) + built SPA + CSAI source; AWS SDK RPMs provided |
-| Service granularity | **Separate image per service** (core, http-bridge, webdav-bridge, csai, nginx) |
-| Routing | **Per-tenant subdomains**: `<tenant>.<base>` (SPA + same-origin `/api`,`/csai`) and `<tenant>-drive.<base>` (WebDAV); SPA + WebDAV derive the active tenant from the host |
+| Service granularity | **Separate image per service** (core, http-bridge, webdav-bridge, csai, **mcp**, nginx) |
+| Routing | **Per-tenant subdomains**: `<tenant>.<base>` (SPA + same-origin `/api`,`/csai`,**`/mcp`**) and `<tenant>-drive.<base>` (WebDAV); SPA + WebDAV derive the active tenant from the host |
+| MCP server | **Included** as `fileengine-mcp` (HTTP transport, gRPC+LDAP-backed, already tenant-aware); served at `<tenant>.<base>/mcp`; tool policy via `MCP_*` (delete off by default) |
 | Object store | **External S3 only** (no bundled MinIO) |
 | Secrets | **All provided in `.env`** (no auto-generation) |
 | AI backend | **Bundled Ollama (CPU)** + `nomic-embed-text`; embedder/LLM **repointable** to external providers |
@@ -371,7 +468,8 @@ All bind/volume mounts use `:Z` (SELinux relabel) for Fedora/Podman.
 docker_unified/
 ├── SPECIFICATION.md
 ├── IMPLEMENTATION_PLAN.md         (this doc)
-├── README.md                      (operator quickstart — to write)
+├── README.md                      (operator quickstart — to write after assembly)
+├── ADMINISTRATOR.md               (day-2 system administration guide — to write after assembly)
 ├── .env.example                   (to write)
 ├── docker-compose.yml             (rewritten for the full stack)
 ├── Makefile                       (build RPMs/SPA, stage artifacts, up/down)
@@ -381,6 +479,7 @@ docker_unified/
 │   ├── http-bridge/Dockerfile
 │   ├── webdav-bridge/Dockerfile
 │   ├── csai/Dockerfile
+│   ├── mcp/Dockerfile             (reuse mcp/Dockerfile; build ctx incl. python_interface)
 │   └── nginx/Dockerfile           (SPA + certbot + entrypoint)
 ├── config/
 │   ├── nginx/                     (vhost template, ACME, proxy snippets)
@@ -416,16 +515,27 @@ docker_unified/
    `ollama` service + `nomic-embed-text` model pull; verify event-driven previews,
    on-demand convert, vector search/chat; confirm embedder/LLM are independently
    repointable (CSAI-1) and CSAI tolerates Ollama warm-up (CSAI-2).
-6. **nginx + TLS** — SPA serving, **per-tenant subdomain routing** (incl. the
-   `-drive` WebDAV vhost), and the wildcard cert via **`TLS_MODE`** (automated
-   DNS-01 / manual DNS-01 / BYO) with persistent certs + renewal; same-origin SPA
-   + **subdomain tenant selection** verified end-to-end (FE-1, FE-2).
-7. **Backups** — helper scripts: Postgres dump/restore, LDAP export/import
+6. **MCP** — `fileengine-mcp` image (HTTP transport, build ctx incl.
+   `python_interface`); wire to core gRPC + LDAP; route `<tenant>.<base>/mcp` via
+   nginx; verify per-request auth (Basic/Bearer) and tenant-from-subdomain, and
+   the tool-exposure policy (`MCP_READ_ONLY`/`MCP_ALLOW_DELETE`).
+7. **nginx + TLS** — SPA serving, **per-tenant subdomain routing** (incl. the
+   `-drive` WebDAV vhost and the `/mcp` path), and the wildcard cert via
+   **`TLS_MODE`** (automated DNS-01 / manual DNS-01 / BYO) with persistent certs +
+   renewal; same-origin SPA + **subdomain tenant selection** verified end-to-end
+   (FE-1, FE-2).
+8. **Backups** — helper scripts: Postgres dump/restore, LDAP export/import
    (389-ds `dsctl … db2ldif` / `ldif2db`, or `dsconf backup`), and documented
    S3 bucket guidance.
-8. **Hardening & docs** — healthchecks/ordering, `.env.example`, README
-   (deploy steps, DNS→IP, first-run, renewal, new-tenant procedure), Podman
-   validation.
+9. **Hardening & docs** — healthchecks/ordering, `.env.example`, Podman
+   validation, and (once the stack is assembled) the two operator docs:
+   - **README** — quickstart: deploy steps, point DNS→IP, first-run, cert
+     renewal, the new-tenant procedure.
+   - **ADMINISTRATOR.md** — day-2 administration: tenant lifecycle (`new-tenant.sh`
+     + LDAP console), user/role management, TLS/cert rotation, backup & restore
+     (Postgres + 389-ds + S3), Ollama model management, the MCP tool-exposure
+     policy (`MCP_*`), log/audit locations, healthchecks & troubleshooting,
+     upgrades (rebuild RPMs/images), and the `AT_REST_KEY` safekeeping warning.
 
 ---
 
@@ -448,6 +558,9 @@ All review questions are resolved (see the decisions log, §13):
    and API-automated** options: automated DNS-01 (provider API) / manual DNS-01 /
    BYO cert; persisted to `/etc/letsencrypt`. DNS records via a wildcard A record
    (manual or API). ✓
+8. **MCP server** — **included** as `fileengine-mcp` (HTTP transport, gRPC+LDAP,
+   already tenant-aware); served same-origin at `<tenant>.<base>/mcp`; tool policy
+   via `MCP_*` (delete off by default). See §3, §5, MCP-1/2 in `CODEBASE_ISSUES.md`. ✓
 
 The remaining work is captured as build phases (§16) and the source-code changes
 in `CODEBASE_ISSUES.md`.

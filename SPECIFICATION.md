@@ -30,13 +30,20 @@ Let's Encrypt.
 - **csai-app** — Convert/Search/AI service (FastAPI).
 - **csai-worker** — CSAI event-driven ingest/rendition worker (same image as
   `csai-app`, different command).
+- **mcp** — Model Context Protocol server (`fileengine-mcp`) exposing the
+  FileEngine to AI agents over **HTTP** (Streamable-HTTP); reaches the core over
+  gRPC, authenticates per request against LDAP, and is already tenant-aware.
 - **nginx** — terminates TLS, serves the built SPA, and reverse-proxies the APIs.
 
 All FileEngine images are **Fedora-based** and install the **prebuilt FileEngine
 RPMs** (core/http/webdav) plus the **provided AWS SDK RPMs** (`rpms/aws-sdk/`).
 The core RPM is built with Redis **event emission enabled** (required for
-automatic preview generation). The SPA is built for **same-origin** paths and
-served by nginx.
+automatic preview generation). The **CSAI image installs the full conversion
+toolchain** — system tools (LibreOffice, poppler-utils, ImageMagick, ffmpeg,
+libmagic) **and** the Python PDF backends (docling, pymupdf4llm, pdfplumber) — so
+previews/extraction never silently degrade. The `mcp` and `csai` images are
+Python (the MCP image also bundles the `python_interface` gRPC client). The SPA
+is built for **same-origin** paths and served by nginx.
 
 ## Bundled infrastructure (compose services)
 
@@ -51,8 +58,11 @@ served by nginx.
   [LDAP](#ldap-directory-model).
 - **ollama** — bundled local AI (CPU) serving the **embedding model**
   (`nomic-embed-text`); CSAI points its embedder (and, by default, its chat
-  model) here. Providers remain **configurable** so the embedder and LLM can be
-  repointed at external services later.
+  model) here. A one-shot **`ollama-init`** step **pulls the model on first
+  startup** (system init, not the first user request), so embeddings work
+  immediately; the model persists to a named volume. Providers remain
+  **configurable** so the embedder and LLM can be repointed at external services
+  later.
 
 ## Routing (per-tenant subdomains)
 
@@ -60,12 +70,15 @@ Each tenant `<tenant>` of the base domain `<base>` gets two hostnames:
 
 | Host | Serves |
 |------|--------|
-| `<tenant>.<base>` | SPA + same-origin `/api/` (http-bridge) + `/csai/` (csai-app) |
+| `<tenant>.<base>` | SPA + same-origin `/api/` (http-bridge) + `/csai/` (csai-app) + `/mcp` (mcp) |
 | `<tenant>-drive.<base>` | WebDAV (webdav-bridge) |
 
 - The **SPA derives the active tenant from its subdomain** (`<tenant>.<base>`).
   A user with access to multiple tenants switches by visiting that tenant's
   subdomain; the in-app tenant selector remains for convenience.
+- **MCP** is served same-origin at `<tenant>.<base>/mcp`; the MCP server resolves
+  the tenant from the Host subdomain (or an explicit `X-Tenant`) and authenticates
+  each request against LDAP (Basic or a bearer token from `/mcp/auth/token`).
 - **WebDAV resolves the tenant from the host** by splitting the first label on
   `-` and taking the first segment (`someco-drive.<base>` → `someco`). Tenant
   names therefore must not contain a hyphen.
