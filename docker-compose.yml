@@ -1,123 +1,121 @@
-# FileEngine Core — development stack
+# Unified FileEngine stack.
 #
-# Brings up FileEngine together with the two backing services it expects per
-# rpms/fileengine/.env: PostgreSQL and MinIO (S3). Configuration is passed to
-# the server through environment variables (config source #4 in
-# rpms/fileengine/CONFIGURATION.md), with hostnames/ports rewritten for the
-# compose network. Secrets/tunables come from the sibling .env file.
+# Phase 2 brings up the data layer — Postgres (pgvector) + Redis — the one-shot
+# db-init, and the core gRPC service to verify it boots against them. Later
+# phases append the bridges, CSAI, MCP, and nginx.
+#
+# The object store is EXTERNAL S3 (S3_* in .env). For local testing without an
+# external bucket, add the test override (provides a MinIO):
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up
+#
+# Only nginx (a later phase) publishes host ports; the data services and the core
+# stay internal to the compose network. Config is the operator .env, mapped to
+# per-service environment below.
+
+name: fileengine
 
 services:
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_DB: ${CORE_DB}
     volumes:
-      # ':Z' relabels the bind mount for SELinux (required on Fedora).
-      - ./pgdata:/var/lib/postgresql/data:Z
-    ports:
-      # Host 5434 mirrors the dev .env (FILEENGINE_PG_PORT=5434); the container
-      # still listens on the standard 5432 inside the compose network.
-      - "5434:5432"
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
+  redis:
+    image: redis:7
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
     environment:
-      # The dev .env S3 access/secret keys are used as the MinIO root creds so
-      # FileEngine can authenticate with the exact keys from rpms/fileengine/.env.
-      MINIO_ROOT_USER: ${FILEENGINE_S3_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${FILEENGINE_S3_SECRET_KEY}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
-      # ':Z' relabels the bind mount for SELinux (required on Fedora).
-      - ./miniodata:/data:Z
-    ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # MinIO console
+      - redisdata:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
-  # One-shot job: create the bucket FileEngine syncs to.
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 '${FILEENGINE_S3_ACCESS_KEY}' '${FILEENGINE_S3_SECRET_KEY}' &&
-      mc mb --ignore-existing local/${FILEENGINE_S3_BUCKET} &&
-      echo 'bucket ${FILEENGINE_S3_BUCKET} ready'
-      "
-    restart: "no"
-
-  fileengine:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  # One-shot: create the CSAI database + DB-wide extensions (idempotent). The
+  # core DB is created by the postgres image; the core/CSAI provision their own
+  # per-tenant schemas on demand.
+  db-init:
+    image: pgvector/pgvector:pg16
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      CORE_DB: ${CORE_DB}
+      CSAI_DB: ${CSAI_DB}
+    volumes:
+      - ./init/db-init.sh:/db-init.sh:ro,Z
+      - ./init/migrations:/migrations:ro,Z
+    entrypoint: ["bash", "/db-init.sh"]
+    restart: "no"
+
+  core:
+    image: fileengine-core:${VERSION:-1.0.0}
+    build:
+      context: .
+      dockerfile: images/core/Dockerfile
+    depends_on:
+      postgres:
         condition: service_healthy
-      minio-init:
+      redis:
+        condition: service_healthy
+      db-init:
         condition: service_completed_successfully
     environment:
-      # --- Database (PostgreSQL) ---
+      # --- Database ---
       FILEENGINE_PG_HOST: postgres
       FILEENGINE_PG_PORT: "5432"
-      FILEENGINE_PG_DATABASE: ${POSTGRES_DB}
+      FILEENGINE_PG_DATABASE: ${CORE_DB}
       FILEENGINE_PG_USER: ${POSTGRES_USER}
       FILEENGINE_PG_PASSWORD: ${POSTGRES_PASSWORD}
-
-      # --- Local storage ---
+      # --- Local storage / cache tier ---
       FILEENGINE_STORAGE_BASE: /var/lib/fileengine/storage
-
-      # --- Encryption & compression at rest (dev .env) ---
-      FILEENGINE_ENCRYPT_DATA: "true"
-      FILEENGINE_COMPRESS_DATA: "true"
+      # --- At-rest crypto ---
+      FILEENGINE_ENCRYPT_DATA: ${FILEENGINE_ENCRYPT_DATA:-true}
+      FILEENGINE_COMPRESS_DATA: ${FILEENGINE_COMPRESS_DATA:-true}
       AT_REST_KEY: ${AT_REST_KEY}
-
-      # --- Object store (MinIO) ---
-      FILEENGINE_S3_ENDPOINT: http://minio:9000
-      FILEENGINE_S3_REGION: ${FILEENGINE_S3_REGION}
-      FILEENGINE_S3_BUCKET: ${FILEENGINE_S3_BUCKET}
-      FILEENGINE_S3_ACCESS_KEY: ${FILEENGINE_S3_ACCESS_KEY}
-      FILEENGINE_S3_SECRET_KEY: ${FILEENGINE_S3_SECRET_KEY}
-      FILEENGINE_S3_PATH_STYLE: "true"
-      # dev .env used the (unparsed) FILEENGINE_S3_SUPPORT=minio; the active key
-      # is FILEENGINE_S3_SYNC_SUPPORT, which also accepts the "minio" alias.
-      FILEENGINE_S3_SYNC_SUPPORT: minio
-      FILEENGINE_S3_RETRY_SECONDS: "60"
-
-      # --- gRPC server ---
-      FILEENGINE_GRPC_HOST: 0.0.0.0
-      FILEENGINE_GRPC_PORT: "50051"
-      FILEENGINE_HTTP_THREAD_POOL: "10"
-
-      # --- Monitoring REST listener ---
-      # Bound to 0.0.0.0 (not the dev 127.0.0.1) so it is reachable from the
-      # host and for the container healthcheck.
-      FILEENGINE_HTTP_METRICS_ADDR: 0.0.0.0
-      FILEENGINE_HTTP_METRICS_PORT: "8081"
-
-      # --- Logging (dev .env: debug, console only) ---
-      FILEENGINE_LOG_LEVEL: debug
-      FILEENGINE_LOG_TO_CONSOLE: "true"
-      FILEENGINE_LOG_TO_FILE: "false"
+      # --- Object store (external S3; overridden to MinIO by the test override) ---
+      FILEENGINE_S3_ENDPOINT: ${S3_ENDPOINT}
+      FILEENGINE_S3_REGION: ${S3_REGION}
+      FILEENGINE_S3_BUCKET: ${S3_BUCKET}
+      FILEENGINE_S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      FILEENGINE_S3_SECRET_KEY: ${S3_SECRET_KEY}
+      FILEENGINE_S3_PATH_STYLE: ${S3_PATH_STYLE:-true}
+      FILEENGINE_S3_SYNC_SUPPORT: ${S3_SYNC_SUPPORT:-aws}
+      # --- Redis events (the packaged core is built with events ON) ---
+      FILEENGINE_EVENTS_ENABLED: "true"
+      FILEENGINE_REDIS_HOST: redis
+      FILEENGINE_REDIS_PORT: "6379"
+      FILEENGINE_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      FILEENGINE_EVENTS_STREAM: ${EVENTS_STREAM:-fileengine:events}
     volumes:
-      # FileEngine local file cache / storage base (FILEENGINE_STORAGE_BASE),
-      # persisted to ./filecache in the project. ':Z' relabels for SELinux.
-      - ./filecache:/var/lib/fileengine/storage:Z
-    ports:
-      - "50051:50051"   # gRPC API
-      - "8081:8081"     # monitoring / health REST listener
+      - filecache:/var/lib/fileengine/storage
+    healthcheck:
+      # The metrics listener (:8081) comes up once the core is serving. No curl in
+      # the image, so probe the TCP port with bash.
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/localhost/8081' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 25s
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  filecache:

@@ -1,0 +1,52 @@
+# Local-testing override — provides a MinIO so the stack runs without an external
+# S3 bucket. The core's S3 endpoint is repointed at it.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up
+#
+# Uses the same S3_* creds from .env as the MinIO root credentials.
+
+services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+    volumes:
+      - miniodata:/data
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # console
+    restart: unless-stopped
+
+  # One-shot: wait for MinIO, then create the bucket (idempotent).
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until mc alias set local http://minio:9000 "$${S3_ACCESS_KEY}" "$${S3_SECRET_KEY}"; do
+          echo "waiting for minio..."; sleep 2;
+        done
+        mc mb --ignore-existing local/$${S3_BUCKET}
+        echo "bucket $${S3_BUCKET} ready"
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+    restart: "no"
+
+  core:
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      FILEENGINE_S3_ENDPOINT: http://minio:9000
+      FILEENGINE_S3_SYNC_SUPPORT: minio
+
+volumes:
+  miniodata:

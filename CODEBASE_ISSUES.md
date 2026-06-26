@@ -41,6 +41,14 @@ Confirmed: with `FILEENGINE_LOG_TO_CONSOLE=true` / `FILEENGINE_LOG_TO_FILE=false
 (now baked as defaults in `images/core/Dockerfile`) the core logs to stdout and
 is captured by `docker logs`.
 
+### CORE-6 🟦 — Benign first-run StorageTracker error on a fresh tenant dir
+On first boot against an empty `filecache` volume the core logs
+`[ERROR] [StorageTracker] Error initializing from existing files: … cannot open
+directory … /storage/default`, because the default tenant's storage dir doesn't
+exist yet. It is **non-fatal** (the server continues and serves normally), but
+StorageTracker should treat a missing per-tenant storage dir as empty (info/debug)
+rather than logging an ERROR, to avoid false alarms in container logs.
+
 ### CORE-5 ✅ — Package the service user via sysusers.d (container-installable) (done)
 The `fileengine-server` RPM ships files owned by user/group `fileengine`, so rpm
 auto-generates `Requires: user(fileengine)`/`group(fileengine)` — but the account

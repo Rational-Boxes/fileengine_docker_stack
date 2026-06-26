@@ -358,7 +358,8 @@ All configuration is **operator-provided** (no auto-generation of secrets).
 | `ollama` | ollama | pulled AI models (`nomic-embed-text`, …) |
 | `redisdata` (optional) | redis | event-stream durability |
 
-All bind/volume mounts use `:Z` (SELinux relabel) for Fedora/Podman.
+**Bind** mounts use `:Z` (SELinux relabel) for Fedora/Podman; **named** volumes do
+not (compose warns on `:Z` for named volumes — they are relabeled by the runtime).
 
 ---
 
@@ -510,7 +511,13 @@ docker_unified/
    sysusers fix) and a smoke test brought core+pg+minio up with all localhost
    ports bound and no conflicts, DB schema verified.
 2. **Data layer** — Postgres(pgvector) + Redis + `db-init` (migrations, default
-   tenant); verify core boots against them with S3.
+   tenant); verify core boots against them with S3. ✅
+   *Done:* `docker-compose.yml` (postgres `pgvector/pgvector:pg16`, password
+   `redis:7`, one-shot `db-init`, `core`) + `docker-compose.test.yml` (MinIO for
+   local S3) + `init/db-init.sh` (creates CSAI DB + `vector`/`pg_trgm`, idempotent)
+   + `.env.example`. Verified up: both DBs + extensions provisioned, core boots,
+   verifies schema, connects to S3, and logs **"Redis event emission enabled ->
+   redis:6379"** — all services healthy.
 3. **App layer** — core, http-bridge, webdav-bridge images + compose wiring;
    internal gRPC; verify upload/download/streaming.
 4. **LDAP** — 389-ds (`389ds/dirsrv`) + seed LDIFs/`dsconf` (uid=email,

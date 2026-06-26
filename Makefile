@@ -23,8 +23,10 @@ VERSION  ?= 1.0.0
 RPM_ROOT := $(HOME)/rpmbuild/RPMS
 
 # Staging locations inside docker_unified/.
-RPMS_DIR := $(CURDIR)/rpms/fileengine
-SPA_DIR  := $(CURDIR)/images/nginx/spa
+RPMS_DIR       := $(CURDIR)/rpms/fileengine
+SPA_DIR        := $(CURDIR)/images/nginx/spa
+MIGRATIONS_SRC := $(ROOT)/convert_search_ai/migrations
+MIGRATIONS_DIR := $(CURDIR)/init/migrations
 
 # Built into the SPA at compile time (apex the tenants live under). Empty here so
 # a plain `make` works; set it for a real deployment: `make spa BASE_DOMAIN=host.com`.
@@ -42,7 +44,7 @@ define stage_rpm
 	cp -v "$$f" $(RPMS_DIR)/;
 endef
 
-.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa base-image clean
+.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations base-image clean
 
 help:
 	@echo "Unified FileEngine stack — Phase 1 build pipeline"
@@ -56,8 +58,8 @@ help:
 	@echo "  make base-image    Build the shared base image ($(BASE_IMAGE))"
 	@echo "  make clean         Remove staged rpms/ + spa/ artifacts"
 
-build: rpms spa
-	@echo "==> Phase 1 artifacts staged: rpms/fileengine/ + images/nginx/spa/"
+build: rpms spa stage-migrations
+	@echo "==> artifacts staged: rpms/fileengine/ + images/nginx/spa/ + init/migrations/"
 
 # --- FileEngine RPMs -------------------------------------------------------
 
@@ -91,6 +93,16 @@ spa:
 	@mkdir -p $(SPA_DIR)
 	@rm -rf $(SPA_DIR:%=%)/* && cp -r $(FRONTEND_DIR)/dist/. $(SPA_DIR)/
 	@echo "==> SPA staged to $(SPA_DIR)"
+
+# --- DB migrations (staged for db-init) ------------------------------------
+
+# Stage the CSAI database-wide baseline (extensions) for the db-init service.
+# db-init also inlines the extensions, so this is forward-compatible staging for
+# any additional convert_search_ai migrations.
+stage-migrations:
+	@echo "==> staging CSAI migrations from $(MIGRATIONS_SRC)"
+	@mkdir -p $(MIGRATIONS_DIR)
+	@cp -v $(MIGRATIONS_SRC)/*.sql $(MIGRATIONS_DIR)/ 2>/dev/null || echo "  (no CSAI migrations found)"
 
 # --- Base image ------------------------------------------------------------
 

@@ -16,6 +16,8 @@ letsencrypt/
 rpms/fileengine/*.rpm
 images/nginx/spa/*
 !images/nginx/spa/.gitkeep
+init/migrations/*.sql
+!init/migrations/.gitkeep
 
 # Runtime data / volumes
 data/
