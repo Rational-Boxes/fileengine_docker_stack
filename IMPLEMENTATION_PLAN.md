@@ -546,7 +546,18 @@ docker_unified/
 5. **CSAI + Ollama** — csai image (+ conversion tools), app + worker; bundled
    `ollama` service + `nomic-embed-text` model pull; verify event-driven previews,
    on-demand convert, vector search/chat; confirm embedder/LLM are independently
-   repointable (CSAI-1) and CSAI tolerates Ollama warm-up (CSAI-2).
+   repointable (CSAI-1) and CSAI tolerates Ollama warm-up (CSAI-2). ✅
+   *Done:* `images/csai/` (Fedora + Python + the full conversion toolchain +
+   `python_interface` + CSAI extras; docling behind an `INSTALL_DOCLING` build
+   arg) staged via `make stage-csai`; `ollama` + one-shot `ollama-init` (pulls
+   `nomic-embed-text`); `csai-app` + `csai-worker` (one image, two commands).
+   **Verified end to end:** ollama-init pulled the model; csai-app healthy; the
+   worker consumed a file event, provisioned the tenant schema, fetched content
+   over gRPC, **embedded via the bundled Ollama**, and indexed it →
+   permission-gated `POST /search` returned the doc. Fixed two real worker bugs
+   surfaced here (**CSAI-5** blocking-read crash-loop, **CSAI-6** on-demand tenant
+   provisioning) + log visibility. *(Chat tested with the `echo` provider; an
+   external chat LLM is a config swap. Image ≈3.3 GB without docling.)*
 6. **MCP** — `fileengine-mcp` image (HTTP transport, build ctx incl.
    `python_interface`); wire to core gRPC + LDAP; route `<tenant>.<base>/mcp` via
    nginx; verify per-request auth (Basic/Bearer) and tenant-from-subdomain, and

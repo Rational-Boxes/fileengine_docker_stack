@@ -223,8 +223,123 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  # Bundled local AI (CPU) — serves the embedding model for CSAI.
+  ollama:
+    image: ollama/ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  # One-shot: pull the embedding model on first startup (idempotent — Ollama
+  # no-ops if it's already in the persisted volume).
+  ollama-init:
+    image: ollama/ollama
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      CSAI_EMBEDDING_MODEL: ${CSAI_EMBEDDING_MODEL:-nomic-embed-text}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'ollama pull "$$CSAI_EMBEDDING_MODEL" && echo "model $$CSAI_EMBEDDING_MODEL ready"'
+    restart: "no"
+
+  # CSAI HTTP app — search, RAG chat, document text/preview (serves the SPA /csai).
+  csai-app:
+    image: fileengine-csai:${VERSION:-1.0.0}
+    build:
+      context: images/csai
+      dockerfile: Dockerfile
+      args:
+        INSTALL_DOCLING: ${INSTALL_DOCLING:-1}
+    depends_on:
+      core:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+      ldap-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    environment: &csai-env
+      CSAI_HTTP_HOST: 0.0.0.0
+      CSAI_HTTP_PORT: "8092"
+      CSAI_CORS_ORIGINS: ${CSAI_CORS_ORIGINS:-}
+      CSAI_BRIDGE_URL: http://http-bridge:8090
+      FILEENGINE_GRPC_HOST: core
+      FILEENGINE_GRPC_PORT: "50051"
+      FILEENGINE_CSAI_TENANT: ${DEFAULT_TENANT:-default}
+      FILEENGINE_CSAI_USER: ${LDAP_ADMIN_EMAIL}
+      FILEENGINE_CSAI_PASSWORD: ${LDAP_ADMIN_PASSWORD}
+      FILEENGINE_LDAP_ENDPOINT: ${LDAP_ENDPOINT}
+      FILEENGINE_LDAP_DOMAIN: ${LDAP_DOMAIN}
+      FILEENGINE_LDAP_BIND_DN: ${LDAP_BIND_DN}
+      FILEENGINE_LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD}
+      FILEENGINE_LDAP_TENANT_BASE: ${LDAP_TENANT_BASE}
+      FILEENGINE_LDAP_USER_BASE: ${LDAP_USER_BASE}
+      CSAI_PG_HOST: postgres
+      CSAI_PG_PORT: "5432"
+      CSAI_PG_DATABASE: ${CSAI_DB}
+      CSAI_PG_USER: ${POSTGRES_USER}
+      CSAI_PG_PASSWORD: ${POSTGRES_PASSWORD}
+      FILEENGINE_REDIS_HOST: redis
+      FILEENGINE_REDIS_PORT: "6379"
+      FILEENGINE_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      FILEENGINE_EVENTS_STREAM: ${EVENTS_STREAM:-fileengine:events}
+      # AI providers (independent): embeddings on bundled CPU Ollama, chat external.
+      CSAI_EMBEDDING_PROVIDER: ${CSAI_EMBEDDING_PROVIDER:-ollama}
+      CSAI_EMBEDDING_MODEL: ${CSAI_EMBEDDING_MODEL:-nomic-embed-text}
+      CSAI_EMBEDDING_BASE_URL: ${CSAI_EMBEDDING_BASE_URL:-http://ollama:11434/v1}
+      CSAI_EMBEDDING_DIMENSION: ${CSAI_EMBEDDING_DIMENSION:-768}
+      CSAI_CHAT_PROVIDER: ${CSAI_CHAT_PROVIDER:-anthropic}
+      CSAI_CHAT_MODEL: ${CSAI_CHAT_MODEL:-claude-sonnet-4-6}
+      CSAI_CHAT_BASE_URL: ${CSAI_CHAT_BASE_URL:-}
+      CSAI_CHAT_API_KEY: ${CSAI_CHAT_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    command: ["convert-search-ai"]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8092/healthz').status==200 else 1)\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  # CSAI worker — consumes file events from Redis, converts + indexes (renditions
+  # + pgvector). Same image, different command.
+  csai-worker:
+    image: fileengine-csai:${VERSION:-1.0.0}
+    depends_on:
+      core:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+      ldap-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *csai-env
+    command: ["convert-search-ai-worker"]
+    restart: unless-stopped
+
 volumes:
   pgdata:
   redisdata:
   filecache:
   ldapdata:
+  ollama:

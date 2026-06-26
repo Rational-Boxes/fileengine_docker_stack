@@ -18,6 +18,7 @@ images/nginx/spa/*
 !images/nginx/spa/.gitkeep
 init/migrations/*.sql
 !init/migrations/.gitkeep
+images/csai/build-src/
 
 # Runtime data / volumes
 data/

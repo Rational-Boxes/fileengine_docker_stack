@@ -137,19 +137,40 @@ Changes made:
 - **Startup confirmation log** (`convert_search_ai/src/.../app.py`,
   `_log_ai_config`): on boot CSAI logs `AI providers — embeddings: provider/model/
   dim/endpoint | chat: provider/model/endpoint` (no secrets) so operators can
-  confirm the split took effect.
+  confirm the split took effect — plus a `logging.basicConfig(level=INFO)` in
+  `main()` so the banner is actually emitted under uvicorn (root defaults to WARNING).
 - **Documented the split** as a first-class example in `convert_search_ai/.env.example`
   (CPU-local `nomic-embed-text` embeddings + external chat).
+Verified in-stack (Phase 5): the worker ingested + **embedded via the bundled
+Ollama `nomic-embed-text`** while chat was independently configured.
 
 ### CSAI-2 🟧 — Tolerate Ollama startup / model-pull latency
 The one-shot **`ollama-init`** service pulls `nomic-embed-text` on first startup
-(see IMPLEMENTATION_PLAN §11), and CSAI `depends_on` its completion — but CSAI
-(app + worker) should still **retry/degrade gracefully** if Ollama is briefly
-unavailable or warming up, rather than failing conversions/queries permanently.
+(see IMPLEMENTATION_PLAN §11), and CSAI `depends_on` its completion (verified: the
+model was pulled before the workers started). CSAI should still **retry/degrade
+gracefully** if Ollama is briefly unavailable or warming up rather than failing
+conversions/queries permanently — remaining hardening for a future pass.
 
-### CSAI-3 🟦 — Health endpoint
-Confirm CSAI exposes a `/health` (or similar) endpoint for the compose
-healthcheck.
+### CSAI-3 ✅ — Health endpoint (verified)
+CSAI exposes `GET /healthz` (and `/readyz`). Used as the `csai-app` compose
+healthcheck (via a small `python3 urllib` probe, since the image has no curl).
+
+### CSAI-5 ✅ — Worker crash-loop on blocking-read timeout (fixed)
+Bringing the ingest worker up as a long-running service, a blocking `XREADGROUP`
+(`block_ms=5000`) that returned no entries surfaced as
+`redis.exceptions.TimeoutError: Timeout reading from socket` (redis-py/RESP3 sets
+the read timeout to ~`block_ms` with no buffer), **crash-looping** the worker so
+it never processed events. Fixed in `events.py` `RedisEventSource.read()` —
+catch the timeout and return an empty batch (no events) so the poll loop continues.
+
+### CSAI-6 ✅ — On-demand tenant provisioning in the worker (fixed)
+The worker queried `documents`/`chunks` before the tenant's CSAI schema existed
+(`relation "documents" does not exist`) — the per-tenant schema is created **on
+demand by code**, but only the on-demand convert endpoint did so, not the
+event-driven worker. Fixed in `ingest.py`: provision the tenant schema on its
+first event (idempotent, cached), mirroring the convert endpoint. *(Edge: search
+on a never-ingested tenant still 500s until first ingest provisions it — a
+read-path `ensure_provisioned`/empty-result guard is a small follow-up.)*
 
 ### CSAI-4 🟧 — Install the full conversion toolchain (no silent degradation)
 CSAI **degrades silently** when a conversion dependency is missing —

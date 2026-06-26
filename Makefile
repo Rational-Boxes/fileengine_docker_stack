@@ -44,7 +44,7 @@ define stage_rpm
 	cp -v "$$f" $(RPMS_DIR)/;
 endef
 
-.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations base-image clean
+.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai base-image clean
 
 help:
 	@echo "Unified FileEngine stack — Phase 1 build pipeline"
@@ -58,8 +58,8 @@ help:
 	@echo "  make base-image    Build the shared base image ($(BASE_IMAGE))"
 	@echo "  make clean         Remove staged rpms/ + spa/ artifacts"
 
-build: rpms spa stage-migrations
-	@echo "==> artifacts staged: rpms/fileengine/ + images/nginx/spa/ + init/migrations/"
+build: rpms spa stage-migrations stage-csai
+	@echo "==> artifacts staged: rpms/fileengine/ + images/nginx/spa/ + init/migrations/ + images/csai/build-src/"
 
 # --- FileEngine RPMs -------------------------------------------------------
 
@@ -103,6 +103,19 @@ stage-migrations:
 	@echo "==> staging CSAI migrations from $(MIGRATIONS_SRC)"
 	@mkdir -p $(MIGRATIONS_DIR)
 	@cp -v $(MIGRATIONS_SRC)/*.sql $(MIGRATIONS_DIR)/ 2>/dev/null || echo "  (no CSAI migrations found)"
+
+# --- CSAI build source (staged for the fileengine-csai image) --------------
+
+# The CSAI image needs the convert_search_ai service + the python_interface gRPC
+# client (a sibling repo). Stage both into the image's build context.
+stage-csai:
+	@echo "==> staging CSAI + python_interface source into images/csai/build-src"
+	@rm -rf images/csai/build-src
+	@mkdir -p images/csai/build-src
+	@cp -r $(ROOT)/convert_search_ai images/csai/build-src/convert_search_ai
+	@cp -r $(ROOT)/python_interface images/csai/build-src/python_interface
+	@find images/csai/build-src \( -name '.git' -o -name '__pycache__' -o -name '.venv' \
+	    -o -name 'node_modules' -o -name '*.pyc' \) -prune -exec rm -rf {} + 2>/dev/null || true
 
 # --- Base image ------------------------------------------------------------
 
