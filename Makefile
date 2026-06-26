@@ -44,7 +44,7 @@ define stage_rpm
 	cp -v "$$f" $(RPMS_DIR)/;
 endef
 
-.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai base-image clean
+.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp base-image clean
 
 help:
 	@echo "Unified FileEngine stack — Phase 1 build pipeline"
@@ -58,8 +58,8 @@ help:
 	@echo "  make base-image    Build the shared base image ($(BASE_IMAGE))"
 	@echo "  make clean         Remove staged rpms/ + spa/ artifacts"
 
-build: rpms spa stage-migrations stage-csai
-	@echo "==> artifacts staged: rpms/fileengine/ + images/nginx/spa/ + init/migrations/ + images/csai/build-src/"
+build: rpms spa stage-migrations stage-csai stage-mcp
+	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/build-src/ + mcp/build-src/"
 
 # --- FileEngine RPMs -------------------------------------------------------
 
@@ -115,6 +115,18 @@ stage-csai:
 	@cp -r $(ROOT)/convert_search_ai images/csai/build-src/convert_search_ai
 	@cp -r $(ROOT)/python_interface images/csai/build-src/python_interface
 	@find images/csai/build-src \( -name '.git' -o -name '__pycache__' -o -name '.venv' \
+	    -o -name 'node_modules' -o -name '*.pyc' \) -prune -exec rm -rf {} + 2>/dev/null || true
+
+# --- MCP build source (staged for the fileengine-mcp image) ----------------
+
+# The MCP image needs the mcp server + the python_interface gRPC client.
+stage-mcp:
+	@echo "==> staging MCP + python_interface source into images/mcp/build-src"
+	@rm -rf images/mcp/build-src
+	@mkdir -p images/mcp/build-src
+	@cp -r $(ROOT)/mcp images/mcp/build-src/mcp
+	@cp -r $(ROOT)/python_interface images/mcp/build-src/python_interface
+	@find images/mcp/build-src \( -name '.git' -o -name '__pycache__' -o -name '.venv' \
 	    -o -name 'node_modules' -o -name '*.pyc' \) -prune -exec rm -rf {} + 2>/dev/null || true
 
 # --- Base image ------------------------------------------------------------

@@ -196,18 +196,15 @@ The MCP HTTP server has no dedicated health endpoint; `/mcp` and `/whoami` retur
 `/healthz` (or `/readyz` that reports core-gRPC + LDAP reachability). Until then
 the healthcheck is a TCP/HTTP liveness probe on `:8089`.
 
-### MCP-2 🟧 — Tenant-from-Host behind the reverse proxy + clean path prefix
-MCP is served at `<tenant>.<base>/mcp` and resolves the tenant from the Host
-subdomain's **first label** (or an explicit `X-Tenant`), so nginx must
-**pass the original Host through** (`proxy_set_header Host $host`) for tenancy to
-work. Two things to confirm/handle when finalizing the vhost:
-- the Streamable-HTTP endpoint is reachable cleanly at `/mcp` while its helper
-  routes (`/auth/token`, `/whoami`) sit under the same prefix — map locations so
-  the public paths are unambiguous (consider honoring `X-Forwarded-Prefix`);
-- MCP's `extract_tenant` takes the **whole** first label, so a dedicated
-  `<tenant>-mcp.<base>` subdomain would mis-resolve (`someco-mcp`) — that's why the
-  **path** `/mcp` was chosen; if a dedicated MCP subdomain is ever wanted, MCP must
-  hyphen-split the host like the WebDAV bridge (LDAP-2).
+### MCP-2 ✅ — Tenant-from-Host behind the reverse proxy + clean path prefix (verified)
+**Verified in Phase 6:** nginx routes `location = /mcp` → `mcp:8089/mcp`
+(Streamable-HTTP) and `location /mcp/` → `mcp:8089/` (helpers `/mcp/auth/token`,
+`/mcp/whoami`), passing the Host through (`proxy_set_header Host $host`). A
+`GET <tenant>.<base>/mcp/whoami` returned the identity with the **tenant resolved
+from the Host subdomain** — no `X-Tenant` needed. The dedicated `<tenant>-mcp.<base>`
+subdomain was deliberately not used (MCP takes the whole first label, so it would
+mis-resolve `someco-mcp`; the path avoids it). Optional polish: honor
+`X-Forwarded-Prefix` so the helper paths are prefix-clean.
 
 ### MCP-3 🟦 — Tool-exposure policy defaults for the deployment
 Confirm the deployment sets a sensible policy via `MCP_*`: writes on,
@@ -219,17 +216,16 @@ Confirm the deployment sets a sensible policy via `MCP_*`: writes on,
 
 ## frontend
 
-### FE-1 🟧 — Same-origin / path-prefixed reverse-proxy operation (wired; flows to verify)
-**Done:** the SPA now supports same-origin path bases behind nginx —
-**`.env.production`** sets `VITE_API_BASE=/api` and `VITE_CSAI_BASE=/csai`, and
-`csaiClient.chatSocketUrl()` resolves a **relative** base against
-`window.location` (picking `ws`/`wss` from the page) so the chat WebSocket works
-on `/csai`. The api/auth clients already use `${BASE}/v1/...` (relative-safe) and
-OAuth `return_to` already builds from `window.location.origin` (public origin, no
-hard-coded localhost). **Still to verify end-to-end behind the real proxy:**
-- blob downloads and **Range requests** (PDF/video inline preview),
-- chunked/streaming upload + download through `/api`,
-- WebDAV-served content if referenced.
+### FE-1 ✅ — Same-origin / path-prefixed reverse-proxy operation (verified through nginx)
+The SPA supports same-origin path bases behind nginx — **`.env.production`** sets
+`VITE_API_BASE=/api` and `VITE_CSAI_BASE=/csai`, and `csaiClient.chatSocketUrl()`
+resolves a **relative** base against `window.location` (picking `ws`/`wss`) so the
+chat WebSocket works on `/csai` (nginx carries the Upgrade/Connection headers).
+**Verified in Phase 6 through the real nginx proxy:** the SPA is served at
+`<tenant>.<base>`, `/api` login→whoami→**streaming upload (204)**, then `/csai`
+search returned the freshly-ingested doc — the whole same-origin flow. *(Remaining
+spot-checks for completeness: large blob **Range** requests for PDF/video inline
+preview; `nginx` sets `proxy_buffering off` on `/api` + `/csai` for streaming.)*
 
 ### FE-2 ✅ — SPA: select the active tenant from the subdomain (done)
 The SPA derives the active tenant from the hostname. New

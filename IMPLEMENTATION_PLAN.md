@@ -561,12 +561,24 @@ docker_unified/
 6. **MCP** — `fileengine-mcp` image (HTTP transport, build ctx incl.
    `python_interface`); wire to core gRPC + LDAP; route `<tenant>.<base>/mcp` via
    nginx; verify per-request auth (Basic/Bearer) and tenant-from-subdomain, and
-   the tool-exposure policy (`MCP_READ_ONLY`/`MCP_ALLOW_DELETE`).
+   the tool-exposure policy (`MCP_READ_ONLY`/`MCP_ALLOW_DELETE`). ✅
+   *Done:* `images/mcp/` (staged via `make stage-mcp`) wired to core + LDAP;
+   **verified `GET /mcp/whoami` through nginx** returned the identity with
+   `tenant=default` resolved from the Host subdomain.
 7. **nginx + TLS** — SPA serving, **per-tenant subdomain routing** (incl. the
    `-drive` WebDAV vhost and the `/mcp` path), and the wildcard cert via
    **`TLS_MODE`** (automated DNS-01 / manual DNS-01 / BYO) with persistent certs +
    renewal; same-origin SPA + **subdomain tenant selection** verified end-to-end
-   (FE-1, FE-2).
+   (FE-1, FE-2). ✅
+   *Done:* `images/nginx/` — serves the built (subdomain-aware) SPA and renders
+   the per-tenant vhosts from `BASE_DOMAIN`/`TLS_MODE` (`render-config.sh`);
+   `tls-setup.sh` handles **`none` (unsecured HTTP, testing)** / `selfsigned` /
+   `byo` / `letsencrypt-*` (self-signed bootstrap + `obtain-cert.sh` DNS-01).
+   **Verified through nginx:** SPA served; `/api` login→whoami; `/api` upload →
+   `/csai` search hit (same-origin, FE-1); `/mcp/whoami` (tenant from subdomain);
+   `<tenant>-drive` WebDAV PROPFIND→207; `none` serves HTTP, `selfsigned` serves
+   HTTPS with `:80`→`:443` redirect. *(LE issuance needs real DNS — not exercised
+   here.)*
 8. **Backups** — helper scripts: Postgres dump/restore, LDAP export/import
    (389-ds `dsctl … db2ldif` / `ldif2db`, or `dsconf backup`), and documented
    S3 bucket guidance.
