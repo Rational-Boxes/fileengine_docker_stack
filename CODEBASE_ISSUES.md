@@ -22,12 +22,12 @@ emission on (documented in `file_engine_core/CONFIGURATION.md`). Note: the Debia
 (`debian/`) and Arch (`PKGBUILD`) packaging were **not** changed — the unified
 stack uses the RPM; update those too if those package paths are ever used.
 
-### CORE-2 🟦 — Verify on-first-access tenant auto-provisioning
-By design, a new tenant is created in LDAP (`scripts/new-tenant.sh`) and the core
-**auto-creates the tenant's DB schema and storage folder on first access** — no
-explicit provisioning command is required. Verify this works end-to-end for a
-brand-new tenant in the containerized deployment (schema + folder materialize on
-the first request without manual steps). No new admin command needed.
+### CORE-2 ✅ — On-first-access tenant auto-provisioning (verified, default tenant)
+Confirmed in Phase 4: with only the LDAP `default` tenant seeded (no explicit DB
+provisioning), the first authenticated write created the file successfully — the
+core materialized the `default` tenant's DB schema + storage folder on first
+access. *(A brand-new non-default tenant via `scripts/new-tenant.sh` should be
+spot-checked the same way, but the auto-provisioning path is proven.)*
 
 ### CORE-3 ✅ — Headless first-boot bootstrap against an empty DB (verified)
 Confirmed in the Phase-1 smoke test: the events image, pointed at a brand-new
@@ -97,6 +97,15 @@ Implication: **tenant names must not contain a hyphen** (enforced by
 the same constraint already applies to the auto-created `tenant_<tenant>` schema.
 This fits the existing `extractTenantFromHost`. Validate the resolved tenant
 against the authenticated user's LDAP membership.
+
+### LDAP-3 🟧 — Use a least-privilege LDAP bind account (not Directory Manager)
+Phase 4 wires the bridges/MCP to bind as **`cn=Directory Manager`** (the 389-ds
+root) using the instance DM password, which works but is over-privileged — the
+services only need to **search** `ou=users`/`ou=tenants` and read group
+membership. Add a dedicated read-only service account (e.g.
+`cn=svc-bridge,<suffix>`) with an ACI granting read/search on those subtrees,
+seed it in `ldap-init`, and point `LDAP_BIND_DN`/`LDAP_BIND_PASSWORD` at it so the
+DM password isn't distributed to the app services.
 
 ### BRIDGE-1 ✅ — All wiring is env-configurable (verified)
 Confirmed in Phase 3: both bridges read everything from env —

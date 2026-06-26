@@ -64,6 +64,44 @@ services:
     entrypoint: ["bash", "/db-init.sh"]
     restart: "no"
 
+  # 389 Directory Server — authentication + tenant/role groups. Internal only
+  # (LDAP 3389, LDAPS 3636). Console (Cockpit) can be enabled separately.
+  ldap:
+    image: 389ds/dirsrv:latest
+    environment:
+      DS_DM_PASSWORD: ${LDAP_BIND_PASSWORD}
+      DS_SUFFIX_NAME: ${LDAP_DOMAIN}
+      LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD}
+    volumes:
+      - ldapdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "ldapsearch -H ldap://localhost:3389 -x -D 'cn=Directory Manager' -w \"$$LDAP_BIND_PASSWORD\" -b cn=config -s base dn >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+    restart: unless-stopped
+
+  # One-shot: create the suffix backend + seed the DIT (ou=users, ou=tenants,
+  # default tenant role groups, initial admin). Idempotent.
+  ldap-init:
+    image: 389ds/dirsrv:latest
+    depends_on:
+      ldap:
+        condition: service_healthy
+    environment:
+      LDAP_URI: ldap://ldap:3389
+      LDAP_SUFFIX: ${LDAP_DOMAIN}
+      LDAP_BIND_DN: ${LDAP_BIND_DN:-cn=Directory Manager}
+      LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD}
+      DEFAULT_TENANT: ${DEFAULT_TENANT:-default}
+      LDAP_ADMIN_EMAIL: ${LDAP_ADMIN_EMAIL}
+      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD}
+    volumes:
+      - ./init/ldap-seed.sh:/ldap-seed.sh:ro,Z
+    entrypoint: ["bash", "/ldap-seed.sh"]
+    restart: "no"
+
   core:
     image: fileengine-core:${VERSION:-1.0.0}
     build:
@@ -125,6 +163,8 @@ services:
     depends_on:
       core:
         condition: service_healthy
+      ldap-init:
+        condition: service_completed_successfully
     environment:
       FILEENGINE_GRPC_HOST: core
       FILEENGINE_GRPC_PORT: "50051"
@@ -160,6 +200,8 @@ services:
     depends_on:
       core:
         condition: service_healthy
+      ldap-init:
+        condition: service_completed_successfully
     environment:
       FILEENGINE_GRPC_HOST: core
       FILEENGINE_GRPC_PORT: "50051"
@@ -185,3 +227,4 @@ volumes:
   pgdata:
   redisdata:
   filecache:
+  ldapdata:

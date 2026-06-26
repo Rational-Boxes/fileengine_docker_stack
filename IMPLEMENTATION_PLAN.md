@@ -483,12 +483,13 @@ docker_unified/
 │   ├── mcp/Dockerfile             (reuse mcp/Dockerfile; build ctx incl. python_interface)
 │   └── nginx/Dockerfile           (SPA + certbot + entrypoint)
 ├── config/
-│   ├── nginx/                     (vhost template, ACME, proxy snippets)
-│   └── ldap/                      (seed LDIFs / bootstrap)
+│   └── nginx/                     (vhost template, ACME, proxy snippets — Phase 6)
 ├── init/
-│   ├── db-init.sh                 (migrations + default tenant)
-│   ├── ollama-pull.sh             (pull nomic-embed-text on first run)
-│   └── render-config.sh           (env → nginx/CORS)
+│   ├── db-init.sh                 ✅ create CSAI DB + vector/pg_trgm + migrations
+│   ├── migrations/               (staged CSAI baseline SQL — gitignored)
+│   ├── ldap-seed.sh               ✅ 389-ds backend + DIT seed (idempotent)
+│   ├── ollama-pull.sh             (pull nomic-embed-text — via ollama-init, Phase 5)
+│   └── render-config.sh           (env → nginx/CORS — Phase 6)
 ├── scripts/
 │   └── new-tenant.sh              (provision a tenant OU + role groups in LDAP) ✅ written
 ├── backup/
@@ -530,7 +531,18 @@ docker_unified/
    test needs an LDAP-issued token, so it rides with Phase 4 (LDAP).
 4. **LDAP** — 389-ds (`389ds/dirsrv`) + seed LDIFs/`dsconf` (uid=email,
    tenants/role groups) + web console; align the bridges' LDAP config to
-   `ou=tenants` (LDAP-1); verify login → tenant + roles.
+   `ou=tenants` (LDAP-1); verify login → tenant + roles. ✅
+   *Done:* `ldap` (389-ds) + one-shot `ldap-init` (`init/ldap-seed.sh`: creates
+   the suffix backend via `dsconf --create-suffix`, seeds `ou=users`/`ou=tenants`/
+   default-tenant role groups + the initial admin). Bridges wired to it
+   (`depends_on: ldap-init`). **Verified end to end:** LDAP login →
+   `POST /v1/auth/token`; `whoami` returned `tenant=default`,
+   `roles=[users,contributors,administrators,system_admin]`; and the **deferred
+   Phase-3 transfer test passed** — create-in-root (system_admin) → 1 MiB
+   streaming upload (HTTP 204) → download with exact sha256 roundtrip, which also
+   emitted `file.created`/`file.updated` to the compose Redis (full events
+   pipeline). *(Default-tenant role resolution confirmed; the LDAP-1 cleanup is
+   still recommended for clean non-default-tenant role resolution.)*
 5. **CSAI + Ollama** — csai image (+ conversion tools), app + worker; bundled
    `ollama` service + `nomic-embed-text` model pull; verify event-driven previews,
    on-demand convert, vector search/chat; confirm embedder/LLM are independently
