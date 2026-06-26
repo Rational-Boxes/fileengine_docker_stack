@@ -11,6 +11,12 @@ letsencrypt/
 *.key
 *.crt
 
+# Build artifacts produced by `make` (sources live in the component repos).
+# The provided AWS SDK RPMs under rpms/aws-sdk/ are inputs and stay tracked.
+rpms/fileengine/*.rpm
+images/nginx/spa/*
+!images/nginx/spa/.gitkeep
+
 # Runtime data / volumes
 data/
 volumes/

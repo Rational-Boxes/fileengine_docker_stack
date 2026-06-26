@@ -29,14 +29,28 @@ explicit provisioning command is required. Verify this works end-to-end for a
 brand-new tenant in the containerized deployment (schema + folder materialize on
 the first request without manual steps). No new admin command needed.
 
-### CORE-3 🟦 — Headless first-boot bootstrap against an empty DB
-Confirm the core initializes cleanly against a brand-new empty `fileengine`
-database (TenantManager schema creation, default tenant) with no manual SQL.
-Provide any required baseline SQL for the `db-init` job if not fully automatic.
+### CORE-3 ✅ — Headless first-boot bootstrap against an empty DB (verified)
+Confirmed in the Phase-1 smoke test: the events image, pointed at a brand-new
+empty `fileengine` database, initialized the connection pool, **created/verified
+the global tables, and verified the schema** with no manual SQL — then began
+object-store init. No baseline SQL is required for `db-init` for the core's own
+tables. *(Default-tenant provisioning on first access still tracked under CORE-2.)*
 
-### CORE-4 🟦 — Container logging
-Confirm/standardize stdout logging in containers (`FILEENGINE_LOG_TO_CONSOLE=true`,
-`FILEENGINE_LOG_TO_FILE=false`) so logs are captured by Docker/Podman.
+### CORE-4 ✅ — Container logging (verified)
+Confirmed: with `FILEENGINE_LOG_TO_CONSOLE=true` / `FILEENGINE_LOG_TO_FILE=false`
+(now baked as defaults in `images/core/Dockerfile`) the core logs to stdout and
+is captured by `docker logs`.
+
+### CORE-5 ✅ — Package the service user via sysusers.d (container-installable) (done)
+The `fileengine-server` RPM ships files owned by user/group `fileengine`, so rpm
+auto-generates `Requires: user(fileengine)`/`group(fileengine)` — but the account
+was created only via `%pre useradd`, **providing neither symbol**, so a clean
+`dnf install` in a minimal container failed with *"nothing provides
+user(fileengine)"*. Fixed by shipping `/usr/lib/sysusers.d/fileengine.conf`
+(`file_engine_core/fileengine.sysusers`, installed in the spec's `%install`/`%files`)
+so the package **self-provides** those symbols and creates the account via
+systemd-sysusers; the `%pre` useradd remains as a fallback. Verified: the events
+RPM now installs cleanly into the base image (user auto-created, uid 998).
 
 ---
 

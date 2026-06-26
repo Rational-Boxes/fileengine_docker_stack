@@ -503,7 +503,12 @@ docker_unified/
 ## 16. Implementation phases
 
 1. **Build pipeline** — `Makefile` + base image; produce FileEngine RPMs
-   (core with events ON) and the built SPA; stage into `rpms/`/contexts.
+   (core with events ON) and the built SPA; stage into `rpms/`/contexts. ✅
+   *Done:* `Makefile` builds/stages all three RPM sets + the SPA;
+   `images/base/Dockerfile` (Fedora + AWS SDK runtime closure) and
+   `images/core/Dockerfile` build; the events RPM installs cleanly (CORE-5
+   sysusers fix) and a smoke test brought core+pg+minio up with all localhost
+   ports bound and no conflicts, DB schema verified.
 2. **Data layer** — Postgres(pgvector) + Redis + `db-init` (migrations, default
    tenant); verify core boots against them with S3.
 3. **App layer** — core, http-bridge, webdav-bridge images + compose wiring;
