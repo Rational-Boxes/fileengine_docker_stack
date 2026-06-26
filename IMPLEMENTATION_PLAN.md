@@ -469,9 +469,9 @@ not (compose warns on `:Z` for named volumes — they are relabeled by the runti
 docker_unified/
 ├── SPECIFICATION.md
 ├── IMPLEMENTATION_PLAN.md         (this doc)
-├── README.md                      (operator quickstart — to write after assembly)
-├── ADMINISTRATOR.md               (day-2 system administration guide — to write after assembly)
-├── .env.example                   (to write)
+├── README.md                      ✅ operator quickstart
+├── ADMINISTRATOR.md               ✅ day-2 system administration guide
+├── .env.example                   ✅ full config reference
 ├── docker-compose.yml             (rewritten for the full stack)
 ├── Makefile                       (build RPMs/SPA, stage artifacts, up/down)
 ├── images/
@@ -588,14 +588,17 @@ docker_unified/
    versioning/replication guidance + the `AT_REST_KEY` warning). Verified against
    the live stack: valid `PGDMP` dumps + a 9-entry directory LDIF.
 9. **Hardening & docs** — healthchecks/ordering, `.env.example`, Podman
-   validation, and (once the stack is assembled) the two operator docs:
-   - **README** — quickstart: deploy steps, point DNS→IP, first-run, cert
-     renewal, the new-tenant procedure.
-   - **ADMINISTRATOR.md** — day-2 administration: tenant lifecycle (`new-tenant.sh`
-     + LDAP console), user/role management, TLS/cert rotation, backup & restore
-     (Postgres + 389-ds + S3), Ollama model management, the MCP tool-exposure
-     policy (`MCP_*`), log/audit locations, healthchecks & troubleshooting,
-     upgrades (rebuild RPMs/images), and the `AT_REST_KEY` safekeeping warning.
+   validation, and the two operator docs. ✅ *(docs done; Podman validation
+   remains)*
+   - **README.md** ✅ — quickstart: configure → `make build`/`base-image`/
+     `compose build` → DNS→IP → `up`; TLS modes; unsecured local testing with
+     `/etc/hosts`; tenants; backups.
+   - **ADMINISTRATOR.md** ✅ — service/port map, config, tenant lifecycle
+     (`new-tenant.sh`), user/role management (LDAP CLI + role→access map),
+     TLS/cert rotation, AI providers + Ollama models, MCP policy, backup/restore,
+     logs/audit, health & troubleshooting, upgrades, `AT_REST_KEY` safekeeping.
+   - Healthchecks + ordered `depends_on` and `.env.example` were built up across
+     phases 2–6. **Podman validation** is the remaining hardening item.
 
 ---
 
