@@ -581,7 +581,12 @@ docker_unified/
    here.)*
 8. **Backups** — helper scripts: Postgres dump/restore, LDAP export/import
    (389-ds `dsctl … db2ldif` / `ldif2db`, or `dsconf backup`), and documented
-   S3 bucket guidance.
+   S3 bucket guidance. ✅
+   *Done:* `backup/backup.sh` (both Postgres DBs via `pg_dump -Fc`, LDAP subtree
+   → portable LDIF, `.env`/`AT_REST_KEY` at 0600, manifest), `backup/restore.sh`
+   (`pg_restore --clean`, idempotent `ldapadd -c`), and `backup/README.md` (S3
+   versioning/replication guidance + the `AT_REST_KEY` warning). Verified against
+   the live stack: valid `PGDMP` dumps + a 9-entry directory LDIF.
 9. **Hardening & docs** — healthchecks/ordering, `.env.example`, Podman
    validation, and (once the stack is assembled) the two operator docs:
    - **README** — quickstart: deploy steps, point DNS→IP, first-run, cert
