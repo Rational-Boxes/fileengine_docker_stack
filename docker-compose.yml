@@ -277,6 +277,10 @@ services:
       CSAI_HTTP_HOST: 0.0.0.0
       CSAI_HTTP_PORT: "8092"
       CSAI_CORS_ORIGINS: ${CSAI_CORS_ORIGINS:-}
+      # Accept the bridge's bearer token (introspected at /v1/auth/introspect) so
+      # the SPA's single login also authenticates chat/search here. REQUIRED for
+      # the frontend — without it the SPA reuses its bridge token and CSAI rejects
+      # it with "authentication required" (the /chat WebSocket closes 4401).
       CSAI_BRIDGE_URL: http://http-bridge:8090
       FILEENGINE_GRPC_HOST: core
       FILEENGINE_GRPC_PORT: "50051"
