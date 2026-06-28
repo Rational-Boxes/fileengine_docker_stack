@@ -4,7 +4,7 @@
 # shared base (Fedora + AWS SDK runtime libs). dnf resolves the runtime deps
 # (postgresql-libs, openssl, libcurl, libuuid, hiredis) from the Fedora repos;
 # the fileengine-libs RPM Requires hiredis, so the events path is wired.
-FROM fileengine-base:1.1.0
+FROM fileengine-base:1.2.0
 
 COPY rpms/fileengine/fileengine-libs-*.rpm \
      rpms/fileengine/fileengine-server-*.rpm \

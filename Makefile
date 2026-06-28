@@ -21,7 +21,7 @@ FRONTEND_DIR := $(ROOT)/frontend
 
 # Stack release version — tags the built images (fileengine-*:$(VERSION)) and the
 # shared base image. Independent of the component RPM versions below.
-VERSION  ?= 1.1.0
+VERSION  ?= 1.2.0
 
 # Per-component RPM versions. The source repos version independently (core moved
 # to 2.x; the bridges are on 1.x), so each is selected separately when staging.
@@ -37,6 +37,13 @@ RPMS_DIR       := $(CURDIR)/rpms/fileengine
 SPA_DIR        := $(CURDIR)/images/nginx/spa
 MIGRATIONS_SRC := $(ROOT)/convert_search_ai/migrations
 MIGRATIONS_DIR := $(CURDIR)/init/migrations
+
+# Cruft pruned from staged source trees before they become an image build context:
+# VCS metadata, Python caches/virtualenvs, JS deps, and editor/IDE files (.idea,
+# .vscode, *.iml, swap/backup files, .DS_Store). Keeps images lean + reproducible.
+STAGE_PRUNE := \( -name '.git' -o -name '__pycache__' -o -name '.venv' \
+	-o -name 'node_modules' -o -name '*.pyc' -o -name '.idea' -o -name '.vscode' \
+	-o -name '*.iml' -o -name '.DS_Store' -o -name '*~' -o -name '*.swp' -o -name '*.swo' \)
 
 # Built into the SPA at compile time (apex the tenants live under). Empty here so
 # a plain `make` works; set it for a real deployment: `make spa BASE_DOMAIN=host.com`.
@@ -124,8 +131,7 @@ stage-csai:
 	@mkdir -p images/csai/build-src
 	@cp -r $(ROOT)/convert_search_ai images/csai/build-src/convert_search_ai
 	@cp -r $(ROOT)/python_interface images/csai/build-src/python_interface
-	@find images/csai/build-src \( -name '.git' -o -name '__pycache__' -o -name '.venv' \
-	    -o -name 'node_modules' -o -name '*.pyc' \) -prune -exec rm -rf {} + 2>/dev/null || true
+	@find images/csai/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
 
 # --- MCP build source (staged for the fileengine-mcp image) ----------------
 
@@ -136,8 +142,7 @@ stage-mcp:
 	@mkdir -p images/mcp/build-src
 	@cp -r $(ROOT)/mcp images/mcp/build-src/mcp
 	@cp -r $(ROOT)/python_interface images/mcp/build-src/python_interface
-	@find images/mcp/build-src \( -name '.git' -o -name '__pycache__' -o -name '.venv' \
-	    -o -name 'node_modules' -o -name '*.pyc' \) -prune -exec rm -rf {} + 2>/dev/null || true
+	@find images/mcp/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
 
 # --- Base image ------------------------------------------------------------
 
