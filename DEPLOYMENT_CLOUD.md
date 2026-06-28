@@ -295,6 +295,36 @@ Other hardening:
   (`docker compose up -d --scale csai-worker=N`) for large corpora; it consumes the
   shared Redis event stream.
 
+### Hybrid: fast on-prem edge + cloud of record
+
+Serve files at LAN speed from an on-premises host while the cloud holds the durable
+system of record. FileEngine is built for this: the C++ core writes to **fast local
+storage and returns immediately**, then an async background worker backs the object up to
+S3. The sync is **disconnect-tolerant** — if the cloud link drops, the on-prem node keeps
+serving, queues changes, and **re-establishes the connection and resyncs automatically**
+when it returns (no manual recovery).
+
+Wire it up by tier:
+
+- **File content** — point the core's `FILEENGINE_S3_*` at your cloud bucket (the durable
+  store). Local writes commit immediately; backup/sync runs in the background. Keep the
+  core RPM's Redis **events ON** (the default in this stack) so previews/indexing still
+  fire locally.
+- **Metadata (Postgres) — the important one.** File metadata (paths, ACLs, versions) lives
+  in Postgres, so a *cloud-only* database would turn every on-prem metadata read into a WAN
+  round-trip and erase the local-speed win. Run Postgres as a **cloud primary with one or
+  more local read replicas**: on-prem nodes send **reads to the local replica** (local
+  latency) and **writes to the cloud primary** (the of-record copy). Enable `vector` +
+  `pg_trgm` on the primary; replicas inherit. Expect a small replication lag — a
+  just-committed change may take a beat to appear on the replica.
+- **Directory & events** — keep **LDAP** and **Redis** local for low-latency auth and the
+  event stream. For a single directory of record, 389 Directory supports replication from a
+  cloud supplier to the on-prem instance.
+
+Net result: users get on-prem read/write performance, the cloud provides off-site
+durability and the authoritative copy, and an internet outage degrades to *local-only*
+operation that heals itself on reconnect.
+
 ---
 
 ## 8. Security checklist
