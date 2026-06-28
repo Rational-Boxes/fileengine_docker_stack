@@ -3,7 +3,7 @@
 # Standalone binary: it links gRPC++/protobuf/Poco/OpenLDAP (pulled from the
 # Fedora repos by the RPM's deps), NOT fileengine-libs, and uses no Postgres.
 # Built on the shared base so the FileEngine images share one lower layer.
-FROM fileengine-base:1.1.0
+FROM fileengine-base:1.2.0
 
 COPY rpms/fileengine/fileengine-http-bridge-*.rpm /tmp/rpms/
 RUN set -eux; \

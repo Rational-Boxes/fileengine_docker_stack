@@ -65,13 +65,23 @@ services:
     restart: "no"
 
   # 389 Directory Server — authentication + tenant/role groups. Internal only
-  # (LDAP 3389, LDAPS 3636). Console (Cockpit) can be enabled separately.
+  # (LDAP 3389, LDAPS 3636). Built on Fedora so it carries the OFFICIAL Cockpit
+  # console (cockpit-389-ds); the console is served on :9090 when
+  # COCKPIT_ADMIN_PASSWORD is set and reverse-proxied by nginx at ldap-admin.<base>
+  # (enable with ENABLE_LDAP_ADMIN=1). Same dscontainer init + /data layout as the
+  # upstream image.
   ldap:
-    image: 389ds/dirsrv:latest
+    build:
+      context: .
+      dockerfile: images/ldap/Dockerfile
+    image: fileengine-ldap:${VERSION:-1.1.0}
     environment:
       DS_DM_PASSWORD: ${LDAP_BIND_PASSWORD}
       DS_SUFFIX_NAME: ${LDAP_DOMAIN}
       LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD}
+      # Cockpit console login (PAM/root). Unset → console not started.
+      COCKPIT_ADMIN_PASSWORD: ${COCKPIT_ADMIN_PASSWORD:-}
+      BASE_DOMAIN: ${BASE_DOMAIN}
     volumes:
       - ldapdata:/data
     healthcheck:
@@ -312,6 +322,16 @@ services:
       CSAI_CHAT_BASE_URL: ${CSAI_CHAT_BASE_URL:-}
       CSAI_CHAT_API_KEY: ${CSAI_CHAT_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Web search tool — when enabled (and the chat provider supports tools) the
+      # model may call web_search to answer from the live web alongside documents.
+      CSAI_WEB_SEARCH_ENABLED: ${CSAI_WEB_SEARCH_ENABLED:-false}
+      CSAI_WEB_SEARCH_DEFAULT: ${CSAI_WEB_SEARCH_DEFAULT:-false}
+      CSAI_WEB_SEARCH_PROVIDER: ${CSAI_WEB_SEARCH_PROVIDER:-duckduckgo}
+      CSAI_WEB_SEARCH_RESULTS: ${CSAI_WEB_SEARCH_RESULTS:-5}
+      CSAI_WEB_MAX_ITERATIONS: ${CSAI_WEB_MAX_ITERATIONS:-3}
+      # Indexing reads ALL content (system_admin bypass) so the vector index is
+      # complete; per-user ACLs are enforced at retrieval time. Leave on.
+      CSAI_INDEX_BYPASS_ACL: ${CSAI_INDEX_BYPASS_ACL:-true}
     command: ["convert-search-ai"]
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8092/healthz').status==200 else 1)\" || exit 1"]
@@ -400,6 +420,10 @@ services:
       LE_EMAIL: ${LE_EMAIL:-}
       LE_STAGING: ${LE_STAGING:-false}
       LE_DNS_PROVIDER: ${LE_DNS_PROVIDER:-}
+      # Official 389 Cockpit console at ldap-admin.<base> (off by default). When 1,
+      # nginx renders the vhost with Basic auth (admin / COCKPIT_ADMIN_PASSWORD).
+      ENABLE_LDAP_ADMIN: ${ENABLE_LDAP_ADMIN:-0}
+      COCKPIT_ADMIN_PASSWORD: ${COCKPIT_ADMIN_PASSWORD:-}
     ports:
       - "80:80"
       - "443:443"
