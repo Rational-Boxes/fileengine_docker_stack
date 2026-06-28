@@ -309,7 +309,11 @@ Wire it up by tier:
 - **File content** — point the core's `FILEENGINE_S3_*` at your cloud bucket (the durable
   store). Local writes commit immediately; backup/sync runs in the background. Keep the
   core RPM's Redis **events ON** (the default in this stack) so previews/indexing still
-  fire locally.
+  fire locally. The core keeps an **LRU/LFU local cache of active files with automatic
+  space management** (tunable via `max_cache_size_mb` and `cache_threshold`), so the local
+  disk holds the working set, not the whole corpus — hot files serve at local speed while
+  cold objects page in from S3 on demand. You get a local file server's speed with the
+  object store's effectively unlimited capacity and durability.
 - **Metadata (Postgres) — the important one.** File metadata (paths, ACLs, versions) lives
   in Postgres, so a *cloud-only* database would turn every on-prem metadata read into a WAN
   round-trip and erase the local-speed win. Run Postgres as a **cloud primary with one or
