@@ -106,3 +106,10 @@ docker compose logs -f <service>      # logs (all services log to stdout)
 docker compose down                   # stop (keep data);  down -v  also drops volumes
 ```
 See [`ADMINISTRATOR.md`](ADMINISTRATOR.md) for day-2 administration.
+
+## License
+
+Copyright (C) 2026 James Hickman <james@rationalboxes.com>
+
+This project is licensed under the **GNU General Public License, version 3 (or
+later)** — see the [LICENSE](LICENSE) file for the full text.
