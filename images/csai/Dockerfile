@@ -16,12 +16,16 @@ ARG INSTALL_DOCLING=1
 #   (thumbnails), ffmpeg-free (video poster/clip; ships libopenh264), libmagic.
 #   3D/CAD: opencascade-draw provides DRAWEXE (STEP/IGES/BREP/OBJ/VRML -> glTF);
 #   nodejs/npm host convert2xkt (glTF/IFC/... -> XKT) for the xeokit viewer.
+#   chromium (provides /usr/bin/chromium-browser) is the full-fidelity HTML->PDF
+#   engine for .html documents incl. chat-generated reports (LibreOffice is the
+#   fallback).
 RUN set -eux; \
     dnf -y install \
       python3 python3-pip \
       libreoffice-writer libreoffice-calc libreoffice-impress \
       poppler-utils ImageMagick ffmpeg-free file-libs \
-      opencascade-draw nodejs npm; \
+      opencascade-draw nodejs npm \
+      chromium; \
     dnf clean all; rm -rf /var/cache/dnf
 
 # convert2xkt (xeokit-convert): the glTF/IFC/CityJSON/LAS/STL/PLY -> XKT hop, and
