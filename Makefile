@@ -41,9 +41,15 @@ MIGRATIONS_DIR := $(CURDIR)/init/migrations
 # Cruft pruned from staged source trees before they become an image build context:
 # VCS metadata, Python caches/virtualenvs, JS deps, and editor/IDE files (.idea,
 # .vscode, *.iml, swap/backup files, .DS_Store). Keeps images lean + reproducible.
+#
+# SECURITY: also prune local runtime secrets and logs so they never land in an
+# image layer — real `.env` files (NOT the `.env.example` / `.env-default`
+# templates, which hold only placeholders) and any `*.log` / `*.audit` output.
+# Runtime config is injected via compose env at deploy time, never baked in.
 STAGE_PRUNE := \( -name '.git' -o -name '__pycache__' -o -name '.venv' \
 	-o -name 'node_modules' -o -name '*.pyc' -o -name '.idea' -o -name '.vscode' \
-	-o -name '*.iml' -o -name '.DS_Store' -o -name '*~' -o -name '*.swp' -o -name '*.swo' \)
+	-o -name '*.iml' -o -name '.DS_Store' -o -name '*~' -o -name '*.swp' -o -name '*.swo' \
+	-o -name '.env' -o -name '.env.local' -o -name '*.log' -o -name '*.audit' \)
 
 # Built into the SPA at compile time (apex the tenants live under). Empty here so
 # a plain `make` works; set it for a real deployment: `make spa BASE_DOMAIN=host.com`.
