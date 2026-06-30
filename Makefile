@@ -21,7 +21,7 @@ FRONTEND_DIR := $(ROOT)/frontend
 
 # Stack release version — tags the built images (fileengine-*:$(VERSION)) and the
 # shared base image. Independent of the component RPM versions below.
-VERSION  ?= 1.2.0
+VERSION  ?= 1.3.0
 
 # Per-component RPM versions. The source repos version independently (core moved
 # to 2.x; the bridges are on 1.x), so each is selected separately when staging.
