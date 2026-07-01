@@ -67,7 +67,10 @@ define stage_rpm
 	cp -v "$$f" $(RPMS_DIR)/;
 endef
 
-.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp base-image clean
+.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp base-image publish clean
+
+# Image set (fileengine-<name>:$(VERSION)); used by `publish`.
+IMAGES := base core http-bridge webdav-bridge csai mcp nginx ldap
 
 help:
 	@echo "Unified FileEngine stack — Phase 1 build pipeline"
@@ -79,6 +82,7 @@ help:
 	@echo "  make spa           Build the SPA, stage into images/nginx/spa/"
 	@echo "                       (pass BASE_DOMAIN=host.com for subdomain tenancy)"
 	@echo "  make base-image    Build the shared base image ($(BASE_IMAGE))"
+	@echo "  make publish REGISTRY=<host/ns>   Tag + push all fileengine-*:$(VERSION) to a registry"
 	@echo "  make clean         Remove staged rpms/ + spa/ artifacts"
 
 build: rpms spa stage-migrations stage-csai stage-mcp
@@ -155,6 +159,25 @@ stage-mcp:
 base-image:
 	@echo "==> building base image $(BASE_IMAGE)"
 	docker build -t $(BASE_IMAGE) -f images/base/Dockerfile .
+
+# --- Publish images to a registry ------------------------------------------
+
+# Retag every locally-built fileengine-*:$(VERSION) under $(REGISTRY) and push.
+# REGISTRY is the host + namespace, WITHOUT the image name or tag, e.g.:
+#   Docker Hub:  make publish REGISTRY=docker.io/acme
+#   AWS ECR:     make publish REGISTRY=123456789012.dkr.ecr.us-east-1.amazonaws.com
+#   GHCR:        make publish REGISTRY=ghcr.io/acme
+# Authenticate first (docker login / aws ecr get-login-password | docker login ...).
+publish:
+	@[ -n "$(REGISTRY)" ] || { echo "!! set REGISTRY=<host/namespace>, e.g. make publish REGISTRY=docker.io/acme"; exit 1; }
+	@set -eu; for c in $(IMAGES); do \
+	  src=fileengine-$$c:$(VERSION); dst=$(REGISTRY)/fileengine-$$c:$(VERSION); \
+	  echo "==> $$src -> $$dst"; \
+	  docker image inspect $$src >/dev/null 2>&1 || { echo "  !! missing $$src (run make build + docker compose build)"; exit 1; }; \
+	  docker tag $$src $$dst; \
+	  docker push $$dst; \
+	done
+	@echo "==> published $(IMAGES) to $(REGISTRY) at :$(VERSION)"
 
 # --- Clean -----------------------------------------------------------------
 

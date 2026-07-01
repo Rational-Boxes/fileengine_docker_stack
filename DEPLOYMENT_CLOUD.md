@@ -227,6 +227,70 @@ Then `make base-image` + `docker compose build` bake the images. Component RPM
 versions are pinned in the `Makefile` (`CORE_VERSION`, `HTTP_VERSION`,
 `WEBDAV_VERSION`) and are **independent** of the stack image `VERSION`.
 
+### 5.1 Publishing images to a registry (Docker Hub, AWS ECR, …)
+
+For any deployment where the host doesn't build the images itself (the common
+case), push the locally-built images to a registry and have the host pull them.
+The image set (all tagged `:$(VERSION)`, default `1.3.0`):
+
+```
+fileengine-base  fileengine-core  fileengine-http-bridge  fileengine-webdav-bridge
+fileengine-csai  fileengine-mcp   fileengine-nginx        fileengine-ldap
+```
+
+**One-shot helper.** After `make build` + `docker compose build`, retag + push
+every image under a registry prefix (host + namespace, no image name/tag):
+
+```bash
+make publish REGISTRY=docker.io/acme            # or an ECR/GCR/GHCR prefix
+make publish REGISTRY=ghcr.io/acme VERSION=1.3.0
+```
+
+Authenticate to the registry first (below). `publish` fails fast if an image is
+missing (build it) or `REGISTRY` is unset.
+
+**Docker Hub**
+```bash
+docker login -u <user>                          # prompts for a token/password
+make publish REGISTRY=docker.io/<user-or-org>
+# images land at docker.io/<ns>/fileengine-core:1.3.0, etc.
+```
+
+**AWS ECR (Elastic Container Registry)** — one repository per image:
+```bash
+ACCOUNT=123456789012 REGION=us-east-1
+REG=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com
+# 1. Log in (token is valid ~12h):
+aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $REG
+# 2. Create a repo per image (idempotent):
+for c in base core http-bridge webdav-bridge csai mcp nginx ldap; do
+  aws ecr describe-repositories --repository-names fileengine-$c --region $REGION >/dev/null 2>&1 \
+    || aws ecr create-repository --repository-name fileengine-$c --region $REGION >/dev/null
+done
+# 3. Tag + push:
+make publish REGISTRY=$REG
+```
+On the host, `aws ecr get-login-password | docker login …` then `docker compose pull`.
+
+**GCP Artifact Registry**
+```bash
+gcloud auth configure-docker <region>-docker.pkg.dev
+make publish REGISTRY=<region>-docker.pkg.dev/<project>/<repo>
+```
+
+**GitHub Container Registry (GHCR)**
+```bash
+echo "$GHCR_PAT" | docker login ghcr.io -u <user> --password-stdin
+make publish REGISTRY=ghcr.io/<user-or-org>
+```
+
+**Deploying from the registry.** Point compose at the registry either by setting
+the image refs to `<REGISTRY>/fileengine-<svc>:$VERSION`, or keep the bare names
+and `docker pull <REGISTRY>/… && docker tag …` back to `fileengine-<svc>:$VERSION`
+before `docker compose up`. Match `VERSION` in `.env` to the tag you pushed. The
+private services never expose host ports; only nginx does (§1), so the registry
+choice is purely a distribution detail.
+
 ---
 
 ## 6. Other cloud providers
