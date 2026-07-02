@@ -22,6 +22,7 @@ init/migrations/*.sql
 !init/migrations/.gitkeep
 images/csai/build-src/
 images/mcp/build-src/
+images/ldap-manager/build-src/
 
 # Runtime data / volumes
 data/

@@ -67,10 +67,10 @@ define stage_rpm
 	cp -v "$$f" $(RPMS_DIR)/;
 endef
 
-.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp base-image publish clean
+.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager base-image publish clean
 
 # Image set (fileengine-<name>:$(VERSION)); used by `publish`.
-IMAGES := base core http-bridge webdav-bridge csai mcp nginx ldap
+IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager nginx ldap
 
 help:
 	@echo "Unified FileEngine stack — Phase 1 build pipeline"
@@ -85,7 +85,7 @@ help:
 	@echo "  make publish REGISTRY=<host/ns>   Tag + push all fileengine-*:$(VERSION) to a registry"
 	@echo "  make clean         Remove staged rpms/ + spa/ artifacts"
 
-build: rpms spa stage-migrations stage-csai stage-mcp
+build: rpms spa stage-migrations stage-csai stage-mcp stage-ldap-manager
 	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/build-src/ + mcp/build-src/"
 
 # --- FileEngine RPMs -------------------------------------------------------
@@ -142,6 +142,15 @@ stage-csai:
 	@cp -r $(ROOT)/convert_search_ai images/csai/build-src/convert_search_ai
 	@cp -r $(ROOT)/python_interface images/csai/build-src/python_interface
 	@find images/csai/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
+
+# The ldap-manager image needs just the standalone FastAPI service (no gRPC
+# client — it talks LDAP/Postgres/Redis/SMTP directly).
+stage-ldap-manager:
+	@echo "==> staging ldap_manager source into images/ldap-manager/build-src"
+	@rm -rf images/ldap-manager/build-src
+	@mkdir -p images/ldap-manager/build-src
+	@cp -r $(ROOT)/ldap_manager images/ldap-manager/build-src/ldap_manager
+	@find images/ldap-manager/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
 
 # --- MCP build source (staged for the fileengine-mcp image) ----------------
 
