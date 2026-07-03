@@ -192,6 +192,11 @@ services:
       FILEENGINE_LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:-}
       FILEENGINE_LDAP_TENANT_BASE: ${LDAP_TENANT_BASE:-}
       FILEENGINE_LDAP_USER_BASE: ${LDAP_USER_BASE:-}
+      # Bearer session tokens are signed HS256 JWTs. This secret MUST match every
+      # service that verifies them (csai, ldap-manager). Short TTL + client refresh
+      # (POST /v1/auth/refresh) keeps enforced roles close to LDAP.
+      FILEENGINE_JWT_SECRET: ${FILEENGINE_JWT_SECRET:?set FILEENGINE_JWT_SECRET (see .env.example)}
+      TOKEN_TTL_SECONDS: ${TOKEN_TTL_SECONDS:-900}
     healthcheck:
       test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/localhost/8090' || exit 1"]
       interval: 10s
@@ -292,6 +297,9 @@ services:
       # the frontend — without it the SPA reuses its bridge token and CSAI rejects
       # it with "authentication required" (the /chat WebSocket closes 4401).
       CSAI_BRIDGE_URL: http://http-bridge:8090
+      # Verify the bridge's signed bearer JWTs locally (no introspection round-trip);
+      # must match the bridge's FILEENGINE_JWT_SECRET.
+      FILEENGINE_JWT_SECRET: ${FILEENGINE_JWT_SECRET:?set FILEENGINE_JWT_SECRET (see .env.example)}
       FILEENGINE_GRPC_HOST: core
       FILEENGINE_GRPC_PORT: "50051"
       FILEENGINE_CSAI_TENANT: ${DEFAULT_TENANT:-default}
@@ -430,6 +438,9 @@ services:
       FILEENGINE_LDAP_USER_BASE: ${LDAP_USER_BASE}
       # Auth (introspect the SPA bearer token) + datastores.
       BRIDGE_URL: http://http-bridge:8090
+      # Verify the bridge's signed bearer JWTs locally; must match the bridge's
+      # FILEENGINE_JWT_SECRET. Also forwarded to the bridge to provision home folders.
+      FILEENGINE_JWT_SECRET: ${FILEENGINE_JWT_SECRET:?set FILEENGINE_JWT_SECRET (see .env.example)}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/3
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${CSAI_DB}
       # Email / invites / reset.
