@@ -405,6 +405,144 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  # Discussion — document-anchored threaded comments & review. One image, four run
+  # modes. The API serves the SPA's /discuss/* (threads, comments, dashboard
+  # attention/activity feeds) plus the live co-viewing/comment-sync WebSocket.
+  discussion:
+    image: fileengine-discussion:${VERSION:-1.3.0}
+    build:
+      context: images/discussion
+      dockerfile: Dockerfile
+    depends_on:
+      core:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+      ldap-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    environment: &disc-env
+      DISC_HTTP_HOST: 0.0.0.0
+      DISC_HTTP_PORT: "8094"
+      # Accept the http-bridge bearer token — verify its signed JWTs locally via the
+      # shared secret (fallback: introspection at DISC_BRIDGE_URL) — so the SPA's
+      # single login also authenticates /discuss/*.
+      DISC_BRIDGE_URL: http://http-bridge:8090
+      FILEENGINE_JWT_SECRET: ${FILEENGINE_JWT_SECRET:?set FILEENGINE_JWT_SECRET (see .env.example)}
+      FILEENGINE_GRPC_HOST: core
+      FILEENGINE_GRPC_PORT: "50051"
+      # Default tenant + this service's own agent identity (internal maintenance
+      # only; never an ACL bypass).
+      FILEENGINE_DISC_TENANT: ${DEFAULT_TENANT:-default}
+      FILEENGINE_DISC_USER: ${LDAP_ADMIN_EMAIL}
+      FILEENGINE_DISC_PASSWORD: ${LDAP_ADMIN_PASSWORD}
+      FILEENGINE_LDAP_ENDPOINT: ${LDAP_ENDPOINT}
+      FILEENGINE_LDAP_DOMAIN: ${LDAP_DOMAIN}
+      FILEENGINE_LDAP_BIND_DN: ${LDAP_BIND_DN}
+      FILEENGINE_LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD}
+      FILEENGINE_LDAP_TENANT_BASE: ${LDAP_TENANT_BASE}
+      FILEENGINE_LDAP_USER_BASE: ${LDAP_USER_BASE}
+      # Its own database (per-tenant schema provisioned on demand).
+      DISC_PG_HOST: postgres
+      DISC_PG_PORT: "5432"
+      DISC_PG_DATABASE: ${DISC_DB:-discussion}
+      DISC_PG_USER: ${POSTGRES_USER}
+      DISC_PG_PASSWORD: ${POSTGRES_PASSWORD}
+      FILEENGINE_REDIS_HOST: redis
+      FILEENGINE_REDIS_PORT: "6379"
+      FILEENGINE_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      FILEENGINE_EVENTS_STREAM: ${EVENTS_STREAM:-fileengine:events}
+      # Comment vector index — shares the bundled CPU Ollama with CSAI (dimension
+      # matches nomic-embed-text; it fixes the pgvector column, so keep it aligned).
+      DISC_EMBEDDING_PROVIDER: ${DISC_EMBEDDING_PROVIDER:-ollama}
+      DISC_EMBEDDING_MODEL: ${DISC_EMBEDDING_MODEL:-nomic-embed-text}
+      DISC_EMBEDDING_BASE_URL: ${DISC_EMBEDDING_BASE_URL:-http://ollama:11434/v1}
+      DISC_EMBEDDING_DIMENSION: ${DISC_EMBEDDING_DIMENSION:-768}
+      # Email digest (used by the discussion-digest hourly cron). Links point at the
+      # SPA; SMTP is optional — unset means the digest logs instead of sending.
+      DISC_SPA_BASE_URL: ${DISC_SPA_BASE_URL:-}
+      DISC_DIGEST_ENABLED: ${DISC_DIGEST_ENABLED:-true}
+      DISC_AI_SUMMARY_ENABLED: ${DISC_AI_SUMMARY_ENABLED:-false}
+      DISC_SMTP_HOST: ${DISC_SMTP_HOST:-}
+      DISC_SMTP_PORT: ${DISC_SMTP_PORT:-587}
+      DISC_SMTP_USER: ${DISC_SMTP_USER:-}
+      DISC_SMTP_PASSWORD: ${DISC_SMTP_PASSWORD:-}
+    command: ["discussion"]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import socket,sys; socket.create_connection(('localhost',8094),3)\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  # Discussion event consumer — projects core file events into the activity feed
+  # (and prunes it on file.deleted) and evicts the READ-permission cache on
+  # acl.changed / role.*. Portless; same image, different command.
+  discussion-consumer:
+    image: fileengine-discussion:${VERSION:-1.3.0}
+    depends_on:
+      core:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+      ldap-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *disc-env
+    command: ["discuss-consumer"]
+    restart: unless-stopped
+
+  # Discussion MCP door (Streamable-HTTP) — agents read/post comments under their
+  # own identity. Binds DISC_HTTP_PORT + 1 (8095). Same image.
+  discussion-mcp:
+    image: fileengine-discussion:${VERSION:-1.3.0}
+    depends_on:
+      core:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+      ldap-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *disc-env
+    command: ["discuss-mcp-http"]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import socket,sys; socket.create_connection(('localhost',8095),3)\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  # Discussion digest — the DEFAULT HOURLY CRON for email digests. Runs one pass at
+  # the top of each hour (digest-cron); the sender self-selects due subscriptions,
+  # holds a run lock, and is idempotent per period. Same image.
+  discussion-digest:
+    image: fileengine-discussion:${VERSION:-1.3.0}
+    depends_on:
+      core:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+      ldap-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *disc-env
+    command: ["digest-cron"]
+    restart: unless-stopped
+
   # ldap-manager — tenant user/role admin API + self-service profile/password.
   # Talks LDAP (writes to the master), Postgres (email templates), Redis (invite/
   # reset tokens) and SMTP. Reached via nginx at /ldapadmin; reuses the SPA's
