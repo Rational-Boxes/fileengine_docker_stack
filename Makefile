@@ -67,10 +67,10 @@ define stage_rpm
 	cp -v "$$f" $(RPMS_DIR)/;
 endef
 
-.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager base-image publish clean
+.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion base-image publish clean
 
 # Image set (fileengine-<name>:$(VERSION)); used by `publish`.
-IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager nginx ldap
+IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager discussion nginx ldap
 
 help:
 	@echo "Unified FileEngine stack — Phase 1 build pipeline"
@@ -81,12 +81,13 @@ help:
 	@echo "  make rpm-webdav    webdav-bridge RPM only"
 	@echo "  make spa           Build the SPA, stage into images/nginx/spa/"
 	@echo "                       (pass BASE_DOMAIN=host.com for subdomain tenancy)"
+	@echo "  make stage-discussion  Stage the discussion (comments) service source"
 	@echo "  make base-image    Build the shared base image ($(BASE_IMAGE))"
 	@echo "  make publish REGISTRY=<host/ns>   Tag + push all fileengine-*:$(VERSION) to a registry"
 	@echo "  make clean         Remove staged rpms/ + spa/ artifacts"
 
-build: rpms spa stage-migrations stage-csai stage-mcp stage-ldap-manager
-	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/build-src/ + mcp/build-src/"
+build: rpms spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion
+	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/ + mcp/ + ldap-manager/ + discussion/ build-src"
 
 # --- FileEngine RPMs -------------------------------------------------------
 
@@ -162,6 +163,18 @@ stage-mcp:
 	@cp -r $(ROOT)/mcp images/mcp/build-src/mcp
 	@cp -r $(ROOT)/python_interface images/mcp/build-src/python_interface
 	@find images/mcp/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
+
+# --- Discussion build source (staged for the fileengine-discussion image) ---
+
+# The discussion (threaded comments) image needs the discussion service + the
+# python_interface gRPC client (reused for permission checks, like CSAI / mcp).
+stage-discussion:
+	@echo "==> staging discussion + python_interface source into images/discussion/build-src"
+	@rm -rf images/discussion/build-src
+	@mkdir -p images/discussion/build-src
+	@cp -r $(ROOT)/discussion_threaded_communication images/discussion/build-src/discussion_threaded_communication
+	@cp -r $(ROOT)/python_interface images/discussion/build-src/python_interface
+	@find images/discussion/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
 
 # --- Base image ------------------------------------------------------------
 

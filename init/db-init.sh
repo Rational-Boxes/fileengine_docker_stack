@@ -19,6 +19,7 @@ PGHOST="${POSTGRES_HOST:-postgres}"
 PGPORT="${POSTGRES_PORT:-5432}"
 CORE_DB="${CORE_DB:-fileengine}"
 CSAI_DB="${CSAI_DB:-convert_search_ai}"
+DISC_DB="${DISC_DB:-discussion}"
 export PGPASSWORD="$POSTGRES_PASSWORD"
 
 psql_admin() { psql -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$POSTGRES_USER" "$@"; }
@@ -27,7 +28,7 @@ db_exists()  { [ "$(psql_admin -d postgres -tAc "SELECT 1 FROM pg_database WHERE
 echo "db-init: waiting for postgres at $PGHOST:$PGPORT ..."
 until pg_isready -h "$PGHOST" -p "$PGPORT" -U "$POSTGRES_USER" >/dev/null 2>&1; do sleep 1; done
 
-for db in "$CORE_DB" "$CSAI_DB"; do
+for db in "$CORE_DB" "$CSAI_DB" "$DISC_DB"; do
   if db_exists "$db"; then
     echo "db-init: database '$db' already exists"
   else
@@ -36,8 +37,13 @@ for db in "$CORE_DB" "$CSAI_DB"; do
   fi
 done
 
-echo "db-init: installing extensions in '$CSAI_DB' (vector, pg_trgm)"
-psql_admin -d "$CSAI_DB" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+# CSAI and the discussion service both need pgvector (embeddings) + pg_trgm (fuzzy).
+# Per-tenant tables are provisioned by each service on demand; this only lays down
+# the databases + their extensions.
+for db in "$CSAI_DB" "$DISC_DB"; do
+  echo "db-init: installing extensions in '$db' (vector, pg_trgm)"
+  psql_admin -d "$db" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+done
 
 if compgen -G "/migrations/*.sql" >/dev/null 2>&1; then
   for f in /migrations/*.sql; do

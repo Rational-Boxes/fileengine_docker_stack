@@ -23,6 +23,7 @@ init/migrations/*.sql
 images/csai/build-src/
 images/mcp/build-src/
 images/ldap-manager/build-src/
+images/discussion/build-src/
 
 # Runtime data / volumes
 data/
