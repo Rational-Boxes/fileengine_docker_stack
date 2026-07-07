@@ -231,7 +231,7 @@ versions are pinned in the `Makefile` (`CORE_VERSION`, `HTTP_VERSION`,
 
 For any deployment where the host doesn't build the images itself (the common
 case), push the locally-built images to a registry and have the host pull them.
-The image set (all tagged `:$(VERSION)`, default `1.3.0`):
+The image set (all tagged `:$(VERSION)`, default `1.3.1`):
 
 ```
 fileengine-base  fileengine-core  fileengine-http-bridge  fileengine-webdav-bridge
@@ -243,7 +243,7 @@ every image under a registry prefix (host + namespace, no image name/tag):
 
 ```bash
 make publish REGISTRY=docker.io/acme            # or an ECR/GCR/GHCR prefix
-make publish REGISTRY=ghcr.io/acme VERSION=1.3.0
+make publish REGISTRY=ghcr.io/acme VERSION=1.3.1
 ```
 
 Authenticate to the registry first (below). `publish` fails fast if an image is
@@ -253,7 +253,7 @@ missing (build it) or `REGISTRY` is unset.
 ```bash
 docker login -u <user>                          # prompts for a token/password
 make publish REGISTRY=docker.io/<user-or-org>
-# images land at docker.io/<ns>/fileengine-core:1.3.0, etc.
+# images land at docker.io/<ns>/fileengine-core:1.3.1, etc.
 ```
 
 **AWS ECR (Elastic Container Registry)** — one repository per image:
