@@ -38,6 +38,16 @@ RUN set -eux; \
     ln -sf "$script" /usr/local/bin/convert2xkt; \
     npm cache clean --force; rm -rf /root/.npm
 
+# IfcOpenShell — full IFC (BIM) support: the IfcConvert binary (IFC -> OBJ/glTF/
+# COLLADA, feeding convert2xkt) plus the ifcopenshell Python bindings for property/
+# geometry extraction. Provided as a prebuilt RPM (rpms/ifcopenshell/), so IFC
+# rendition/extraction is first-class rather than degrading to convert2xkt alone.
+COPY rpms/ifcopenshell/*.rpm /tmp/ifc/
+RUN set -eux; \
+    dnf -y install /tmp/ifc/*.rpm; \
+    dnf clean all; rm -rf /var/cache/dnf /tmp/ifc; \
+    IfcConvert --version
+
 # Python: the fileengine gRPC client, then CSAI with conversion + provider extras.
 COPY build-src/python_interface /src/python_interface
 COPY build-src/convert_search_ai /src/convert_search_ai
