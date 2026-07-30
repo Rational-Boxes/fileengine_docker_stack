@@ -18,11 +18,13 @@ ARG INSTALL_DOCLING=1
 #   nodejs/npm host convert2xkt (glTF/IFC/... -> XKT) for the xeokit viewer.
 #   chromium (provides /usr/bin/chromium-browser) is the full-fidelity HTML->PDF
 #   engine for .html documents incl. chat-generated reports (LibreOffice is the
-#   fallback).
+#   fallback). pandoc renders chat "Generate report" output as an editable Word
+#   (.docx) draft (CSAI_PANDOC_BIN).
 RUN set -eux; \
     dnf -y install \
       python3 python3-pip \
       libreoffice-writer libreoffice-calc libreoffice-impress \
+      pandoc \
       poppler-utils ImageMagick ffmpeg-free file-libs \
       opencascade-draw nodejs npm \
       chromium; \
