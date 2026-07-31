@@ -359,6 +359,45 @@ Other hardening:
   (`docker compose up -d --scale csai-worker=N`) for large corpora; it consumes the
   shared Redis event stream.
 
+### File-cache directory (put it on a dedicated volume)
+
+The core keeps its **local file storage / working-set cache** under
+`FILEENGINE_STORAGE_BASE` — this stack sets `/var/lib/fileengine/storage`, backed by the
+`filecache` Docker volume on the `core` service (`docker-compose.yml`). This is the hot
+path: every read/write lands here first and writes **stage here before the async S3
+backup**, so it wants fast disk and headroom. Change the in-container path by setting
+`FILEENGINE_STORAGE_BASE` on `core` (and mounting the volume at the same path).
+
+By default the `filecache` volume lives on the **root disk** under `/var/lib/docker`. In a
+realistic deploy, back it with a **dedicated block device** so cache growth can't fill the
+root filesystem (which would take down the whole host) and so you can size capacity + IOPS
+for the working set independently:
+
+1. **Attach and mount a dedicated disk** on the host (a separate EBS gp3/io2 volume, or
+   local NVMe). One-time:
+   ```sh
+   sudo mkfs.xfs /dev/nvme1n1                     # your attached device
+   sudo mkdir -p /mnt/fileengine-cache
+   echo '/dev/nvme1n1 /mnt/fileengine-cache xfs defaults,nofail 0 2' | sudo tee -a /etc/fstab
+   sudo mount -a
+   ```
+2. **Point `filecache` at it** with a `docker-compose.override.yml` (compose auto-loads it,
+   so `docker compose up -d` needs no extra `-f`):
+   ```yaml
+   volumes:
+     filecache:
+       driver: local
+       driver_opts:
+         type: none
+         o: bind
+         device: /mnt/fileengine-cache
+   ```
+3. **Size the disk to the working set.** The core evicts LRU/LFU once the cache passes
+   `FILEENGINE_CACHE_THRESHOLD` (default `0.8`) of `FILEENGINE_MAX_CACHE_SIZE_MB` (default
+   `1024`) — set both on the `core` env for a larger hot set, and give the disk room above
+   that for write-staging + headroom. Only the *working set* lives here; the full corpus of
+   record is in S3.
+
 ### Hybrid: fast on-prem edge + cloud of record
 
 Serve files at LAN speed from an on-premises host while the cloud holds the durable
@@ -406,6 +445,7 @@ operation that heals itself on reconnect.
 - [ ] `MCP_READ_ONLY` / `MCP_ALLOW_DELETE` set to your agent policy.
 - [ ] Elastic/static IP so wildcard DNS stays valid across restarts.
 - [ ] Postgres/Redis/LDAP are **not** published on host ports (compose keeps them internal).
+- [ ] The `filecache` volume is on a **dedicated disk**, not the root volume (see §7).
 
 ---
 
