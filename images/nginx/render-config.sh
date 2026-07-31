@@ -69,6 +69,17 @@ server {
     include /etc/nginx/snippets/webdav.conf;
 }
 
+# ONLYOFFICE Document Server: docs.<base>. A plain (non-regex) server_name, so
+# nginx matches it ahead of the <tenant> regex below — no collision. Covered by
+# the *.<base> wildcard cert. Body cap raised: the editor saves whole documents.
+server {
+    ${LISTEN}
+    server_name docs.${BASE_DOMAIN};
+    ${SSL}
+    client_max_body_size ${MAXBODY};
+    include /etc/nginx/snippets/onlyoffice.conf;
+}
+
 # Tenant SPA + same-origin /api, /csai, /mcp: <tenant>.<base>.
 server {
     ${LISTEN}

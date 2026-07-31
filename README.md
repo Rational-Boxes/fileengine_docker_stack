@@ -5,8 +5,9 @@
 A single `docker compose` deployment of the whole FileEngine platform — the gRPC
 core, the REST (`http-bridge`) and WebDAV (`webdav-bridge`) gateways, the
 Convert/Search/AI service (`csai` app + worker) with a bundled Ollama, the MCP
-server for AI agents, 389 Directory Server, Postgres (pgvector), Redis, and an
-nginx that terminates TLS and routes per-tenant subdomains.
+server for AI agents, an ONLYOFFICE Document Server for in-browser office editing,
+389 Directory Server, Postgres (pgvector), Redis, and an nginx that terminates TLS
+and routes per-tenant subdomains.
 
 - **Specification:** [`SPECIFICATION.md`](SPECIFICATION.md)
 - **Design & build phases:** [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)
@@ -34,6 +35,12 @@ internal compose network. Each tenant `<t>` of `BASE_DOMAIN` gets:
 Tenant names contain **no hyphen**, so the SPA host and the `-drive` host never
 collide.
 
+One **non-tenant** host is also served: `docs.<base>` → the ONLYOFFICE Document
+Server (in-browser office editing). It's a single shared editor host across
+tenants, so it needs the same `*.<base>` wildcard DNS/cert. Set
+`ONLYOFFICE_JWT_SECRET` in `.env`; editing requires `TLS_MODE` other than `none`
+(the browser loads `https://docs.<base>`).
+
 ## Deploy
 
 ```sh
@@ -57,6 +64,59 @@ First start runs the one-shots automatically: `db-init` (CSAI DB + extensions),
 `ldap-init` (directory + initial admin), `ollama-init` (pull `nomic-embed-text`),
 and (test override) `minio-init`. Then browse `https://<tenant>.<base>` and log
 in as the seeded admin (`LDAP_ADMIN_EMAIL` / `LDAP_ADMIN_PASSWORD`).
+
+## Minimal production deployment (external S3)
+
+The base `docker-compose.yml` expects a **real external S3 bucket** — the
+throwaway MinIO exists **only** in the `docker-compose.test.yml` override. For a
+minimal production install, bring the stack up from the base compose file alone
+(no `-f docker-compose.test.yml`) and point it at your bucket.
+
+1. **Provision the bucket.** Create an S3 bucket up front (the stack does not
+   create it) and a dedicated access key/secret with read+write on it. Works with
+   AWS S3 or any S3-compatible store (MinIO, Ceph RGW, Backblaze B2, Wasabi).
+
+2. **Configure `.env`** (`cp .env.example .env`). The production-critical keys:
+
+   ```ini
+   BASE_DOMAIN=host.com               # public apex; point *.host.com at this host
+   TLS_MODE=letsencrypt-dns           # real wildcard cert (see TLS section)
+   LE_DNS_PROVIDER=cloudflare         # your DNS-01 provider
+
+   # External object store — the file content lives here.
+   S3_ENDPOINT=https://s3.us-east-1.amazonaws.com
+   S3_REGION=us-east-1
+   S3_BUCKET=your-fileengine-bucket
+   S3_ACCESS_KEY=...                  # key scoped to that bucket
+   S3_SECRET_KEY=...
+   S3_PATH_STYLE=false                # false for AWS S3; true for MinIO/Ceph/B2
+
+   # At-rest crypto — keep ENCRYPT on; keep AT_REST_KEY STABLE and BACKED UP
+   # (losing it makes stored objects unreadable).
+   FILEENGINE_ENCRYPT_DATA=true
+   AT_REST_KEY=$(openssl rand -hex 32)
+
+   # Set every secret to a strong unique value.
+   POSTGRES_PASSWORD=...   REDIS_PASSWORD=...   LDAP_BIND_PASSWORD=...
+   LDAP_ADMIN_PASSWORD=...
+   FILEENGINE_JWT_SECRET=$(openssl rand -hex 32)
+   ONLYOFFICE_JWT_SECRET=$(openssl rand -hex 32)   # shared Doc Server <-> CSAI editor JWT
+   ```
+
+3. **Build and bring up** — base compose only, so no MinIO is started:
+
+   ```sh
+   make build BASE_DOMAIN=host.com
+   make base-image && docker compose build
+   docker compose up -d                # note: NO -f docker-compose.test.yml
+   ```
+
+4. **Point `*.host.com`** at the host, then confirm the wildcard cert issued
+   (`docker compose logs nginx`) and browse `https://<tenant>.host.com`.
+
+Back up the bucket with the provider's versioning/replication, and keep
+`AT_REST_KEY` plus the Postgres/LDAP dumps (`backup/backup.sh`) safe — see
+[Backups](#backups).
 
 ## TLS (`TLS_MODE`)
 

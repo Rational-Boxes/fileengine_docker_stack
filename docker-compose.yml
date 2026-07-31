@@ -74,7 +74,7 @@ services:
     build:
       context: .
       dockerfile: images/ldap/Dockerfile
-    image: fileengine-ldap:${VERSION:-1.3.2}
+    image: fileengine-ldap:${VERSION:-1.3.3}
     environment:
       DS_DM_PASSWORD: ${LDAP_BIND_PASSWORD}
       DS_SUFFIX_NAME: ${LDAP_DOMAIN}
@@ -113,7 +113,7 @@ services:
     restart: "no"
 
   core:
-    image: fileengine-core:${VERSION:-1.3.2}
+    image: fileengine-core:${VERSION:-1.3.3}
     build:
       context: .
       dockerfile: images/core/Dockerfile
@@ -166,7 +166,7 @@ services:
   # REST/auth proxy over the gRPC core (serves the SPA's /api). Internal only;
   # nginx (a later phase) terminates TLS and reverse-proxies to it.
   http-bridge:
-    image: fileengine-http-bridge:${VERSION:-1.3.2}
+    image: fileengine-http-bridge:${VERSION:-1.3.3}
     build:
       context: .
       dockerfile: images/http-bridge/Dockerfile
@@ -208,7 +208,7 @@ services:
   # WebDAV gateway over the gRPC core. Internal only; nginx routes the
   # <tenant>-drive.<base> vhost here.
   webdav-bridge:
-    image: fileengine-webdav-bridge:${VERSION:-1.3.2}
+    image: fileengine-webdav-bridge:${VERSION:-1.3.3}
     build:
       context: .
       dockerfile: images/webdav-bridge/Dockerfile
@@ -271,7 +271,7 @@ services:
 
   # CSAI HTTP app — search, RAG chat, document text/preview (serves the SPA /csai).
   csai-app:
-    image: fileengine-csai:${VERSION:-1.3.2}
+    image: fileengine-csai:${VERSION:-1.3.3}
     build:
       context: images/csai
       dockerfile: Dockerfile
@@ -288,6 +288,8 @@ services:
         condition: service_healthy
       ollama-init:
         condition: service_completed_successfully
+      onlyoffice:
+        condition: service_started
     environment: &csai-env
       CSAI_HTTP_HOST: 0.0.0.0
       CSAI_HTTP_PORT: "8092"
@@ -340,6 +342,17 @@ services:
       # Indexing reads ALL content (system_admin bypass) so the vector index is
       # complete; per-user ACLs are enforced at retrieval time. Leave on.
       CSAI_INDEX_BYPASS_ACL: ${CSAI_INDEX_BYPASS_ACL:-true}
+      # ONLYOFFICE in-browser editing (Phase 1.7) — the Document Server is stood up
+      # by the `onlyoffice` service below. DOCSERVER_URL is browser-facing (loads
+      # api.js over the same TLS as the SPA, via the nginx docs.<base> vhost);
+      # CALLBACK_BASE is how the Doc Server reaches CSAI *from inside the compose
+      # network* for document download + save callback (internal DNS, no TLS).
+      # JWT_SECRET must match the Doc Server's JWT_SECRET. The scoped download/
+      # callback token signing secret inherits FILEENGINE_JWT_SECRET (set above).
+      CSAI_ONLYOFFICE_ENABLED: ${CSAI_ONLYOFFICE_ENABLED:-true}
+      CSAI_ONLYOFFICE_DOCSERVER_URL: https://docs.${BASE_DOMAIN}
+      CSAI_ONLYOFFICE_CALLBACK_BASE: http://csai-app:8092
+      CSAI_ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?set ONLYOFFICE_JWT_SECRET (see .env.example)}
     command: ["convert-search-ai"]
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8092/healthz').status==200 else 1)\" || exit 1"]
@@ -352,7 +365,7 @@ services:
   # CSAI worker — consumes file events from Redis, converts + indexes (renditions
   # + pgvector). Same image, different command.
   csai-worker:
-    image: fileengine-csai:${VERSION:-1.3.2}
+    image: fileengine-csai:${VERSION:-1.3.3}
     depends_on:
       core:
         condition: service_healthy
@@ -369,10 +382,33 @@ services:
     command: ["convert-search-ai-worker"]
     restart: unless-stopped
 
+  # ONLYOFFICE Document Server — renders the in-browser office editor (Phase 1.7).
+  # Self-contained: the image bundles its own postgres/rabbitmq/redis, so it does
+  # NOT use our postgres/redis. Stays internal to the compose network; the browser
+  # reaches it through nginx at docs.<base> (see images/nginx). CSAI signs the
+  # editor config and verifies the save callback with the shared JWT_SECRET.
+  onlyoffice:
+    image: onlyoffice/documentserver:8.2
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?set ONLYOFFICE_JWT_SECRET (see .env.example)}
+      JWT_HEADER: Authorization
+    volumes:
+      - onlyoffice-data:/var/www/onlyoffice/Data
+      - onlyoffice-lib:/var/lib/onlyoffice
+      - onlyoffice-logs:/var/log/onlyoffice
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost/healthcheck | grep -q true || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+
   # Model Context Protocol server (Streamable-HTTP) for AI agents. Reaches the
   # core over gRPC; per-request auth against LDAP; tenant from Host/X-Tenant.
   mcp:
-    image: fileengine-mcp:${VERSION:-1.3.2}
+    image: fileengine-mcp:${VERSION:-1.3.3}
     build:
       context: images/mcp
       dockerfile: Dockerfile
@@ -409,7 +445,7 @@ services:
   # modes. The API serves the SPA's /discuss/* (threads, comments, dashboard
   # attention/activity feeds) plus the live co-viewing/comment-sync WebSocket.
   discussion:
-    image: fileengine-discussion:${VERSION:-1.3.2}
+    image: fileengine-discussion:${VERSION:-1.3.3}
     build:
       context: images/discussion
       dockerfile: Dockerfile
@@ -483,7 +519,7 @@ services:
   # (and prunes it on file.deleted) and evicts the READ-permission cache on
   # acl.changed / role.*. Portless; same image, different command.
   discussion-consumer:
-    image: fileengine-discussion:${VERSION:-1.3.2}
+    image: fileengine-discussion:${VERSION:-1.3.3}
     depends_on:
       core:
         condition: service_healthy
@@ -503,7 +539,7 @@ services:
   # Discussion MCP door (Streamable-HTTP) — agents read/post comments under their
   # own identity. Binds DISC_HTTP_PORT + 1 (8095). Same image.
   discussion-mcp:
-    image: fileengine-discussion:${VERSION:-1.3.2}
+    image: fileengine-discussion:${VERSION:-1.3.3}
     depends_on:
       core:
         condition: service_healthy
@@ -528,7 +564,7 @@ services:
   # the top of each hour (digest-cron); the sender self-selects due subscriptions,
   # holds a run lock, and is idempotent per period. Same image.
   discussion-digest:
-    image: fileengine-discussion:${VERSION:-1.3.2}
+    image: fileengine-discussion:${VERSION:-1.3.3}
     depends_on:
       core:
         condition: service_healthy
@@ -548,7 +584,7 @@ services:
   # reset tokens) and SMTP. Reached via nginx at /ldapadmin; reuses the SPA's
   # http-bridge bearer token.
   ldap-manager:
-    image: fileengine-ldap-manager:${VERSION:-1.3.2}
+    image: fileengine-ldap-manager:${VERSION:-1.3.3}
     build:
       context: images/ldap-manager
       dockerfile: Dockerfile
@@ -602,7 +638,7 @@ services:
   # nginx — TLS termination, SPA serving, per-tenant subdomain routing. The ONLY
   # service that publishes host ports.
   nginx:
-    image: fileengine-nginx:${VERSION:-1.3.2}
+    image: fileengine-nginx:${VERSION:-1.3.3}
     build:
       context: images/nginx
       dockerfile: Dockerfile
@@ -614,6 +650,8 @@ services:
       webdav-bridge:
         condition: service_started
       mcp:
+        condition: service_started
+      onlyoffice:
         condition: service_started
     environment:
       BASE_DOMAIN: ${BASE_DOMAIN}
@@ -642,3 +680,6 @@ volumes:
   ollama:
   letsencrypt:
   nginxtls:
+  onlyoffice-data:
+  onlyoffice-lib:
+  onlyoffice-logs:
