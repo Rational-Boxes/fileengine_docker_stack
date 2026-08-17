@@ -21,7 +21,11 @@ service talks over the internal compose network and is never exposed publicly.
 | `webdav-bridge` | WebDAV gateway (`<t>-drive.<base>`) | internal |
 | `csai-app` / `csai-worker` | Convert/Search/AI (RAG chat, search, indexing) | internal `:8092` |
 | `mcp` | MCP server for AI agents (`/mcp`) | internal |
-| `postgres` (pgvector) | core metadata + CSAI vectors | internal `:5432` |
+| `discussion` (+ consumer / mcp / digest) | document-anchored comments & review (`/discuss`) | internal `:8094/8095` |
+| `folder-actions` (+ consumer / reconcile) | event-driven folder actions (`/folder-actions`) | internal `:8099` |
+| `ldap-manager` | tenant user/role admin + self-service (`/ldapadmin`) | internal `:8093` |
+| `onlyoffice` | Document Server for in-browser office editing (`docs.<base>`) | internal `:80` |
+| `postgres` (pgvector) | core metadata + CSAI vectors + discussion/folder-actions state | internal `:5432` |
 | `redis` | core event stream + CSAI cache invalidation | internal `:6379` |
 | `ldap` (389-ds) | auth + tenant/role groups | internal `:3389` |
 | `ollama` | bundled CPU embeddings (`nomic-embed-text`) | internal `:11434` |
@@ -29,6 +33,10 @@ service talks over the internal compose network and is never exposed publicly.
 **External dependency you must provide:** an **S3-compatible object store** for
 file content (AWS S3, GCS in S3-interop mode, Azure via MinIO gateway, DO Spaces,
 MinIO, …). Everything else is in the compose project.
+
+**Optionally external:** `postgres` can be a managed server instead of the bundled
+container — set `POSTGRES_HOST`/`POSTGRES_PORT` and add
+`-f docker-compose.external-data.yml`. See §7.1.
 
 ### Tenancy & DNS
 Each tenant `<t>` of `BASE_DOMAIN` is a subdomain:
@@ -337,7 +345,7 @@ is a drop-in via env + removing the bundled service from compose:
 
 | Bundled | Managed swap | How |
 |---|---|---|
-| `postgres` | RDS / Cloud SQL / Azure DB **for Postgres with pgvector** | Point `CSAI_PG_HOST`/`CSAI_PG_*` **and** the core's `FILEENGINE_PG_*` at the endpoint; create `CORE_DB` + `CSAI_DB`; ensure the `vector` + `pg_trgm` extensions are enabled. Remove the `postgres` service + `db-init` (run its SQL once against the managed DB). |
+| `postgres` | RDS / Cloud SQL / Azure DB **for Postgres with pgvector** | Set `POSTGRES_HOST`/`POSTGRES_PORT` and add `-f docker-compose.external-data.yml` — see §7.1. Every service's `*_PG_HOST` follows those two keys. |
 | `redis` | ElastiCache / Memorystore | Set `FILEENGINE_REDIS_HOST`/`_PORT`/`_PASSWORD` (core **and** CSAI). Remove the bundled `redis`. |
 | `ldap` | Existing 389-ds / AD / any LDAP | Set `LDAP_ENDPOINT` + bind/base envs to your directory; keep the tenant/role group conventions (`LDAP_REFERENCE.md`). Remove `ldap`/`ldap-init`. |
 | `ollama` | GPU node or hosted embeddings | Repoint `CSAI_EMBEDDING_BASE_URL` (and switch provider/model if hosted). Keep `CSAI_EMBEDDING_DIMENSION` matched to the model. |
@@ -358,6 +366,71 @@ Other hardening:
 - **Scaling:** `csai-worker` is the ingest workhorse — scale it horizontally
   (`docker compose up -d --scale csai-worker=N`) for large corpora; it consumes the
   shared Redis event stream.
+
+### 7.1 External Postgres + external object store
+
+The two datastores that hold everything of record can both live outside the stack.
+The object store already does — the core has never bundled one. Postgres is a
+one-file override away.
+
+**Postgres.** In `.env`:
+
+```ini
+POSTGRES_HOST=mydb.abc123.us-east-1.rds.amazonaws.com
+POSTGRES_PORT=5432
+POSTGRES_USER=fileengine
+POSTGRES_PASSWORD=<secret>
+```
+
+Then bring the stack up with the override, which drops the bundled `postgres`
+service and its `pgdata` volume:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.external-data.yml up -d
+```
+
+Every service's database host follows `POSTGRES_HOST`/`POSTGRES_PORT` — the core
+(`FILEENGINE_PG_*`), CSAI, discussion, folder_actions and ldap-manager alike, so
+there is nothing else to repoint. Requirements on the server:
+
+- **PostgreSQL 16+**, reachable from the compose network.
+- `POSTGRES_USER` needs **CREATEDB**. `db-init` still runs and creates all four
+  databases (`CORE_DB`, `CSAI_DB`, `DISC_DB`, `FA_DB`) — with the bundled server
+  `CORE_DB` came from the postgres image, here db-init creates it too. Or
+  pre-create the four and grant ownership; db-init is idempotent and skips
+  existing ones.
+- The **`vector`** and **`pg_trgm`** extensions must be installable in `CSAI_DB`
+  and `DISC_DB` (db-init issues `CREATE EXTENSION IF NOT EXISTS`). Both ship in
+  the default extension set on RDS and Cloud SQL. The core and folder_actions
+  need no extensions.
+- Back it up with the provider's snapshots; `backup/backup.sh` assumes the
+  bundled container.
+
+**Object store.** Configured entirely by the `S3_*` keys in `.env` — no override
+needed. For real AWS S3:
+
+```ini
+S3_ENDPOINT=https://s3.us-east-1.amazonaws.com
+S3_REGION=us-east-1
+S3_BUCKET=my-fileengine-bucket
+S3_ACCESS_KEY=<key>
+S3_SECRET_KEY=<secret>
+S3_PATH_STYLE=false        # virtual-hosted addressing; true for MinIO et al.
+S3_SYNC_SUPPORT=aws        # `minio` for MinIO; `false` for local-only
+```
+
+MinIO, Ceph, Cloudflare R2, Backblaze B2 and Wasabi all work through the same
+keys with `S3_PATH_STYLE=true`. Per-tenant buckets derive from `S3_BUCKET`, and
+the credentials need read/write on them (plus `CreateBucket` if you let the core
+provision them).
+
+Note the `filecache` volume stays in both cases — it is the core's local
+cache/write-staging tier, not the store of record. The exception is
+`S3_SYNC_SUPPORT=false` (no object store at all), where that volume **is** the
+store of record and must be backed up; see the next section.
+
+Redis and LDAP are not covered by this override — externalize those per the table
+above.
 
 ### File-cache directory (put it on a dedicated volume)
 

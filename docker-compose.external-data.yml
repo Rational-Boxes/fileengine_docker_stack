@@ -1,0 +1,72 @@
+# External data layer — run the stack against YOUR Postgres and YOUR object store
+# instead of the bundled ones.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.external-data.yml up -d
+#
+# What this override changes: it drops the bundled `postgres` service (and its
+# pgdata volume) and removes the startup dependencies on it. Everything else is
+# already driven by .env — the services read POSTGRES_HOST / POSTGRES_PORT, so
+# point those at your server before bringing the stack up.
+#
+# --- Postgres --------------------------------------------------------------
+# In .env:
+#   POSTGRES_HOST=mydb.abc123.us-east-1.rds.amazonaws.com
+#   POSTGRES_PORT=5432
+#   POSTGRES_USER=fileengine
+#   POSTGRES_PASSWORD=...
+#
+# Requirements on the external server:
+#   - PostgreSQL 16 or newer, reachable from the compose network.
+#   - POSTGRES_USER needs CREATEDB: db-init still runs and creates all four
+#     databases (CORE_DB, CSAI_DB, DISC_DB, FA_DB). With the bundled server
+#     CORE_DB came from the postgres image; here db-init creates it too.
+#     Alternatively pre-create the four and grant the user ownership — db-init is
+#     idempotent and will skip any that already exist.
+#   - The `vector` (pgvector) and `pg_trgm` extensions must be installable in
+#     CSAI_DB and DISC_DB; db-init issues CREATE EXTENSION IF NOT EXISTS. On RDS
+#     and Cloud SQL both ship in the default extension set. folder_actions and
+#     the core need no extensions.
+#   - TLS: set `sslmode` expectations on the server side. The services connect
+#     with libpq defaults (sslmode=prefer), so a server that requires TLS works
+#     without extra config; a server that rejects non-TLS on some paths should be
+#     fronted per your own policy.
+#
+# --- Object store ----------------------------------------------------------
+# Nothing to override here: the stack has never bundled an object store — the
+# core always syncs to an external S3-compatible bucket configured by the S3_*
+# keys in .env (see the "Object store" section of .env.example). For real AWS S3:
+#
+#   S3_ENDPOINT=https://s3.us-east-1.amazonaws.com
+#   S3_REGION=us-east-1
+#   S3_BUCKET=my-fileengine-bucket
+#   S3_ACCESS_KEY=...
+#   S3_SECRET_KEY=...
+#   S3_PATH_STYLE=false        # virtual-hosted addressing
+#   S3_SYNC_SUPPORT=aws
+#
+# For MinIO / Ceph / R2 / B2 / Wasabi keep S3_PATH_STYLE=true. The `filecache`
+# volume stays either way — it is the core's local cache/storage tier, not the
+# store of record, unless you set S3_SYNC_SUPPORT=false (local-only, no object
+# store, in which case that volume IS the store of record and needs backing up).
+#
+# Note this override does NOT externalize Redis or LDAP; those stay bundled.
+
+services:
+  # Not started — an external server takes its place.
+  postgres: !reset null
+
+  # Still runs (it creates the databases + extensions on the external server),
+  # but no longer waits on the bundled container.
+  db-init:
+    depends_on: !reset null
+
+  # Keep the redis + db-init ordering; drop only the postgres dependency.
+  core:
+    depends_on: !override
+      redis:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata: !reset null

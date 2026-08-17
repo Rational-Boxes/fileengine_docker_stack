@@ -2,15 +2,16 @@
 # One-shot data-layer initialization (idempotent; safe to re-run).
 #
 #  - The core database (CORE_DB) is created by the postgres image (POSTGRES_DB).
-#  - Create the CSAI database (CSAI_DB) if absent — CREATE DATABASE has no
-#    IF NOT EXISTS, so guard it.
+#  - Create the satellite-service databases (CSAI_DB, DISC_DB, FA_DB) if absent —
+#    CREATE DATABASE has no IF NOT EXISTS, so guard each.
 #  - Install the DB-wide extensions CSAI needs (vector, pg_trgm) — mirrors
 #    convert_search_ai/migrations/0001_baseline.sql; also applies any extra
 #    staged migration SQL mounted at /migrations.
 #
 # No per-tenant DDL here: the core auto-creates its schema + default tenant on
 # first access, and CSAI provisions per-tenant tables (documents/chunks) on
-# demand. So this only lays down databases + extensions.
+# demand. So this only lays down databases + extensions. folder_actions needs no
+# extensions (gen_random_uuid() is native in PG13+) — just the database.
 set -euo pipefail
 
 : "${POSTGRES_USER:?POSTGRES_USER required}"
@@ -20,6 +21,7 @@ PGPORT="${POSTGRES_PORT:-5432}"
 CORE_DB="${CORE_DB:-fileengine}"
 CSAI_DB="${CSAI_DB:-convert_search_ai}"
 DISC_DB="${DISC_DB:-discussion}"
+FA_DB="${FA_DB:-folder_actions}"
 export PGPASSWORD="$POSTGRES_PASSWORD"
 
 psql_admin() { psql -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$POSTGRES_USER" "$@"; }
@@ -28,7 +30,7 @@ db_exists()  { [ "$(psql_admin -d postgres -tAc "SELECT 1 FROM pg_database WHERE
 echo "db-init: waiting for postgres at $PGHOST:$PGPORT ..."
 until pg_isready -h "$PGHOST" -p "$PGPORT" -U "$POSTGRES_USER" >/dev/null 2>&1; do sleep 1; done
 
-for db in "$CORE_DB" "$CSAI_DB" "$DISC_DB"; do
+for db in "$CORE_DB" "$CSAI_DB" "$DISC_DB" "$FA_DB"; do
   if db_exists "$db"; then
     echo "db-init: database '$db' already exists"
   else

@@ -4,10 +4,12 @@
 
 A single `docker compose` deployment of the whole FileEngine platform — the gRPC
 core, the REST (`http-bridge`) and WebDAV (`webdav-bridge`) gateways, the
-Convert/Search/AI service (`csai` app + worker) with a bundled Ollama, the MCP
-server for AI agents, an ONLYOFFICE Document Server for in-browser office editing,
-389 Directory Server, Postgres (pgvector), Redis, and an nginx that terminates TLS
-and routes per-tenant subdomains.
+Convert/Search/AI service (`csai` app + worker) with a bundled Ollama, the
+discussion service (document-anchored comments & review), `folder-actions`
+(event-driven actions bound to a folder), `ldap-manager` (tenant user/role admin),
+the MCP server for AI agents, an ONLYOFFICE Document Server for in-browser office
+editing, 389 Directory Server, Postgres (pgvector), Redis, and an nginx that
+terminates TLS and routes per-tenant subdomains.
 
 - **Specification:** [`SPECIFICATION.md`](SPECIFICATION.md)
 - **Design & build phases:** [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)
@@ -19,6 +21,9 @@ and routes per-tenant subdomains.
 - Docker (or Podman) with the `compose` plugin.
 - An external **S3-compatible bucket** + access keys. *(For local testing the
   `docker-compose.test.yml` override runs a throwaway MinIO instead.)*
+- Postgres is **bundled** by default. To run against a managed server instead, set
+  `POSTGRES_HOST`/`POSTGRES_PORT` in `.env` and add
+  `-f docker-compose.external-data.yml` — see `DEPLOYMENT_CLOUD.md` §7.1.
 - A **domain** with a **wildcard DNS A record** `*.<base> → host IP` (so every
   tenant subdomain resolves). *(For local testing, use `/etc/hosts` aliases.)*
 
@@ -29,7 +34,7 @@ internal compose network. Each tenant `<t>` of `BASE_DOMAIN` gets:
 
 | Host | Serves |
 |------|--------|
-| `<t>.<base>` | SPA + same-origin `/api` (http-bridge), `/csai` (csai-app), `/mcp` (mcp) |
+| `<t>.<base>` | SPA + same-origin `/api` (http-bridge), `/csai` (csai-app), `/mcp` (mcp), `/discuss` (discussion), `/folder-actions` (folder-actions), `/ldapadmin` (ldap-manager) |
 | `<t>-drive.<base>` | WebDAV (webdav-bridge) |
 
 Tenant names contain **no hyphen**, so the SPA host and the `-drive` host never

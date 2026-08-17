@@ -21,7 +21,7 @@ FRONTEND_DIR := $(ROOT)/frontend
 
 # Stack release version — tags the built images (fileengine-*:$(VERSION)) and the
 # shared base image. Independent of the component RPM versions below.
-VERSION  ?= 1.3.3
+VERSION  ?= 1.4.0
 
 # Per-component RPM versions. The source repos version independently (core moved
 # to 2.x; the bridges are on 1.x), so each is selected separately when staging.
@@ -67,10 +67,10 @@ define stage_rpm
 	cp -v "$$f" $(RPMS_DIR)/;
 endef
 
-.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion base-image publish clean
+.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions base-image publish clean
 
 # Image set (fileengine-<name>:$(VERSION)); used by `publish`.
-IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager discussion nginx ldap
+IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager discussion folder-actions nginx ldap
 
 help:
 	@echo "Unified FileEngine stack — Phase 1 build pipeline"
@@ -82,12 +82,13 @@ help:
 	@echo "  make spa           Build the SPA, stage into images/nginx/spa/"
 	@echo "                       (pass BASE_DOMAIN=host.com for subdomain tenancy)"
 	@echo "  make stage-discussion  Stage the discussion (comments) service source"
+	@echo "  make stage-folder-actions  Stage the folder_actions service source"
 	@echo "  make base-image    Build the shared base image ($(BASE_IMAGE))"
 	@echo "  make publish REGISTRY=<host/ns>   Tag + push all fileengine-*:$(VERSION) to a registry"
 	@echo "  make clean         Remove staged rpms/ + spa/ artifacts"
 
-build: rpms spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion
-	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/ + mcp/ + ldap-manager/ + discussion/ build-src"
+build: rpms spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions
+	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/ + mcp/ + ldap-manager/ + discussion/ + folder-actions/ build-src"
 
 # --- FileEngine RPMs -------------------------------------------------------
 
@@ -175,6 +176,18 @@ stage-discussion:
 	@cp -r $(ROOT)/discussion_threaded_communication images/discussion/build-src/discussion_threaded_communication
 	@cp -r $(ROOT)/python_interface images/discussion/build-src/python_interface
 	@find images/discussion/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
+
+# --- folder_actions build source (staged for the fileengine-folder-actions image) ---
+
+# The folder-actions image needs the folder_actions service + the python_interface
+# gRPC client (reused for permission checks / moves, like discussion / CSAI / mcp).
+stage-folder-actions:
+	@echo "==> staging folder_actions + python_interface source into images/folder-actions/build-src"
+	@rm -rf images/folder-actions/build-src
+	@mkdir -p images/folder-actions/build-src
+	@cp -r $(ROOT)/folder_actions images/folder-actions/build-src/folder_actions
+	@cp -r $(ROOT)/python_interface images/folder-actions/build-src/python_interface
+	@find images/folder-actions/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
 
 # --- Base image ------------------------------------------------------------
 

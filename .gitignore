@@ -24,6 +24,7 @@ images/csai/build-src/
 images/mcp/build-src/
 images/ldap-manager/build-src/
 images/discussion/build-src/
+images/folder-actions/build-src/
 
 # Runtime data / volumes
 data/
