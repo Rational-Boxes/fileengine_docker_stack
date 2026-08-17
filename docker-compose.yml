@@ -637,6 +637,15 @@ services:
       FILEENGINE_REDIS_PASSWORD: ${REDIS_PASSWORD}
       FILEENGINE_EVENTS_STREAM: ${EVENTS_STREAM:-fileengine:events}
       FA_EVENTS_GROUP: ${FA_EVENTS_GROUP:-folder_actions}
+      # Reconcile sweep (§8) — recovers work missed during a Redis outage or past
+      # stream retention by re-walking bound folders. Idempotent against the live
+      # consumer, so it is safe to leave on.
+      FA_RECONCILE_ENABLED: ${FA_RECONCILE_ENABLED:-true}
+      FA_RECONCILE_INTERVAL_S: ${FA_RECONCILE_INTERVAL_S:-900}
+      FA_RECONCILE_LOOKBACK_S: ${FA_RECONCILE_LOOKBACK_S:-86400}
+      FA_RECONCILE_OVERLAP_S: ${FA_RECONCILE_OVERLAP_S:-300}
+      FA_RECONCILE_MAX_FILES: ${FA_RECONCILE_MAX_FILES:-5000}
+      FA_RECONCILE_MAX_DEPTH: ${FA_RECONCILE_MAX_DEPTH:-32}
       # Sorter text extraction + rendition conversion come from CSAI; the
       # raise_review action posts to the discussion service.
       FA_CSAI_BASE_URL: http://csai-app:8092
