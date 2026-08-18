@@ -25,6 +25,7 @@ images/mcp/build-src/
 images/ldap-manager/build-src/
 images/discussion/build-src/
 images/folder-actions/build-src/
+images/difference/build-src/
 
 # Runtime data / volumes
 data/

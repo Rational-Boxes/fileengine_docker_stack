@@ -21,7 +21,7 @@ FRONTEND_DIR := $(ROOT)/frontend
 
 # Stack release version — tags the built images (fileengine-*:$(VERSION)) and the
 # shared base image. Independent of the component RPM versions below.
-VERSION  ?= 1.4.1
+VERSION  ?= 1.5.0
 
 # Per-component RPM versions. The source repos version independently (core moved
 # to 2.x; the bridges are on 1.x), so each is selected separately when staging.
@@ -67,10 +67,10 @@ define stage_rpm
 	cp -v "$$f" $(RPMS_DIR)/;
 endef
 
-.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions base-image publish clean
+.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference base-image publish clean
 
 # Image set (fileengine-<name>:$(VERSION)); used by `publish`.
-IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager discussion folder-actions nginx ldap
+IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager discussion folder-actions difference nginx ldap
 
 help:
 	@echo "Unified FileEngine stack — Phase 1 build pipeline"
@@ -83,12 +83,14 @@ help:
 	@echo "                       (pass BASE_DOMAIN=host.com for subdomain tenancy)"
 	@echo "  make stage-discussion  Stage the discussion (comments) service source"
 	@echo "  make stage-folder-actions  Stage the folder_actions service source"
+	@echo "  make stage-difference  Stage the difference_service source"
+	@echo "                       (pass IFC_RPM_DIR=... to enable IFC GlobalId matching)"
 	@echo "  make base-image    Build the shared base image ($(BASE_IMAGE))"
 	@echo "  make publish REGISTRY=<host/ns>   Tag + push all fileengine-*:$(VERSION) to a registry"
 	@echo "  make clean         Remove staged rpms/ + spa/ artifacts"
 
-build: rpms spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions
-	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/ + mcp/ + ldap-manager/ + discussion/ + folder-actions/ build-src"
+build: rpms spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference
+	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/ + mcp/ + ldap-manager/ + discussion/ + folder-actions/ + difference/ build-src"
 
 # --- FileEngine RPMs -------------------------------------------------------
 
@@ -188,6 +190,33 @@ stage-folder-actions:
 	@cp -r $(ROOT)/folder_actions images/folder-actions/build-src/folder_actions
 	@cp -r $(ROOT)/python_interface images/folder-actions/build-src/python_interface
 	@find images/folder-actions/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
+
+# --- Difference build source (staged for the fileengine-difference image) ---
+
+# The difference image needs the difference service + the python_interface gRPC
+# client (used for version content, permission checks and rendition writes, like
+# CSAI / discussion / folder-actions).
+#
+# It also stages an ifc-rpms/ directory. That directory is normally EMPTY and the
+# image builds fine that way — it exists so the COPY in the Dockerfile always has
+# a source. Populate it to enable the IFC GlobalId matcher:
+#   make stage-difference IFC_RPM_DIR=/path/to/ifcopenshell/rpms
+# and then build that image with --build-arg INSTALL_IFC=1.
+IFC_RPM_DIR ?=
+
+stage-difference:
+	@echo "==> staging difference_service + python_interface source into images/difference/build-src"
+	@rm -rf images/difference/build-src
+	@mkdir -p images/difference/build-src/ifc-rpms
+	@cp -r $(ROOT)/difference_service images/difference/build-src/difference_service
+	@cp -r $(ROOT)/python_interface images/difference/build-src/python_interface
+	@if [ -n "$(IFC_RPM_DIR)" ]; then \
+	  echo "==> staging IfcOpenShell RPMs from $(IFC_RPM_DIR)"; \
+	  cp -v $(IFC_RPM_DIR)/*.rpm images/difference/build-src/ifc-rpms/; \
+	else \
+	  echo "  (no IFC_RPM_DIR set: IFC compares by geometry, not GlobalId)"; \
+	fi
+	@find images/difference/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
 
 # --- Base image ------------------------------------------------------------
 

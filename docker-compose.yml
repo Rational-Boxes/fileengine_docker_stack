@@ -77,7 +77,7 @@ services:
     build:
       context: .
       dockerfile: images/ldap/Dockerfile
-    image: fileengine-ldap:${VERSION:-1.4.1}
+    image: fileengine-ldap:${VERSION:-1.5.0}
     environment:
       DS_DM_PASSWORD: ${LDAP_BIND_PASSWORD}
       DS_SUFFIX_NAME: ${LDAP_DOMAIN}
@@ -116,7 +116,7 @@ services:
     restart: "no"
 
   core:
-    image: fileengine-core:${VERSION:-1.4.1}
+    image: fileengine-core:${VERSION:-1.5.0}
     build:
       context: .
       dockerfile: images/core/Dockerfile
@@ -171,7 +171,7 @@ services:
   # REST/auth proxy over the gRPC core (serves the SPA's /api). Internal only;
   # nginx (a later phase) terminates TLS and reverse-proxies to it.
   http-bridge:
-    image: fileengine-http-bridge:${VERSION:-1.4.1}
+    image: fileengine-http-bridge:${VERSION:-1.5.0}
     build:
       context: .
       dockerfile: images/http-bridge/Dockerfile
@@ -213,7 +213,7 @@ services:
   # WebDAV gateway over the gRPC core. Internal only; nginx routes the
   # <tenant>-drive.<base> vhost here.
   webdav-bridge:
-    image: fileengine-webdav-bridge:${VERSION:-1.4.1}
+    image: fileengine-webdav-bridge:${VERSION:-1.5.0}
     build:
       context: .
       dockerfile: images/webdav-bridge/Dockerfile
@@ -276,7 +276,7 @@ services:
 
   # CSAI HTTP app — search, RAG chat, document text/preview (serves the SPA /csai).
   csai-app:
-    image: fileengine-csai:${VERSION:-1.4.1}
+    image: fileengine-csai:${VERSION:-1.5.0}
     build:
       context: images/csai
       dockerfile: Dockerfile
@@ -370,7 +370,7 @@ services:
   # CSAI worker — consumes file events from Redis, converts + indexes (renditions
   # + pgvector). Same image, different command.
   csai-worker:
-    image: fileengine-csai:${VERSION:-1.4.1}
+    image: fileengine-csai:${VERSION:-1.5.0}
     depends_on:
       core:
         condition: service_healthy
@@ -413,7 +413,7 @@ services:
   # Model Context Protocol server (Streamable-HTTP) for AI agents. Reaches the
   # core over gRPC; per-request auth against LDAP; tenant from Host/X-Tenant.
   mcp:
-    image: fileengine-mcp:${VERSION:-1.4.1}
+    image: fileengine-mcp:${VERSION:-1.5.0}
     build:
       context: images/mcp
       dockerfile: Dockerfile
@@ -450,7 +450,7 @@ services:
   # modes. The API serves the SPA's /discuss/* (threads, comments, dashboard
   # attention/activity feeds) plus the live co-viewing/comment-sync WebSocket.
   discussion:
-    image: fileengine-discussion:${VERSION:-1.4.1}
+    image: fileengine-discussion:${VERSION:-1.5.0}
     build:
       context: images/discussion
       dockerfile: Dockerfile
@@ -524,7 +524,7 @@ services:
   # (and prunes it on file.deleted) and evicts the READ-permission cache on
   # acl.changed / role.*. Portless; same image, different command.
   discussion-consumer:
-    image: fileengine-discussion:${VERSION:-1.4.1}
+    image: fileengine-discussion:${VERSION:-1.5.0}
     depends_on:
       core:
         condition: service_healthy
@@ -544,7 +544,7 @@ services:
   # Discussion MCP door (Streamable-HTTP) — agents read/post comments under their
   # own identity. Binds DISC_HTTP_PORT + 1 (8095). Same image.
   discussion-mcp:
-    image: fileengine-discussion:${VERSION:-1.4.1}
+    image: fileengine-discussion:${VERSION:-1.5.0}
     depends_on:
       core:
         condition: service_healthy
@@ -569,7 +569,7 @@ services:
   # the top of each hour (digest-cron); the sender self-selects due subscriptions,
   # holds a run lock, and is idempotent per period. Same image.
   discussion-digest:
-    image: fileengine-discussion:${VERSION:-1.4.1}
+    image: fileengine-discussion:${VERSION:-1.5.0}
     depends_on:
       core:
         condition: service_healthy
@@ -589,7 +589,7 @@ services:
   # three run modes. The API serves the SPA's /folder-actions/* admin surface
   # (bindings, action types, classifier editor, run log).
   folder-actions:
-    image: fileengine-folder-actions:${VERSION:-1.4.1}
+    image: fileengine-folder-actions:${VERSION:-1.5.0}
     build:
       context: images/folder-actions
       dockerfile: Dockerfile
@@ -674,7 +674,7 @@ services:
   # folder_actions event worker — matches fileengine:events against the bound
   # folders and runs their actions. Portless; same image, different command.
   folder-actions-consumer:
-    image: fileengine-folder-actions:${VERSION:-1.4.1}
+    image: fileengine-folder-actions:${VERSION:-1.5.0}
     depends_on:
       folder-actions:
         condition: service_healthy
@@ -690,7 +690,7 @@ services:
   # folder_actions reconcile sweep — periodic catch-up for events missed during an
   # outage or dropped past the stream's retention window. Same image.
   folder-actions-reconcile:
-    image: fileengine-folder-actions:${VERSION:-1.4.1}
+    image: fileengine-folder-actions:${VERSION:-1.5.0}
     depends_on:
       folder-actions:
         condition: service_healthy
@@ -703,12 +703,97 @@ services:
     command: ["folder-actions-reconcile"]
     restart: unless-stopped
 
+  # difference_service — version-to-version comparison. Builds "diff renditions"
+  # (a baked PDF overlay, or a merged XKT for 3D/CAD) that the SPA's unified
+  # viewer opens like any other rendition, so a comparison is just another
+  # document with the same comment history behind it.
+  #
+  # Deliberately NO Postgres: the cache key and its invalidation live on the
+  # renditions themselves, written back into core under the source file's UID.
+  difference:
+    image: fileengine-difference:${VERSION:-1.5.0}
+    build:
+      context: images/difference
+      dockerfile: Dockerfile
+    depends_on:
+      core:
+        condition: service_healthy
+      ldap-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment: &diff-env
+      DIFF_HTTP_HOST: 0.0.0.0
+      DIFF_HTTP_PORT: "8100"
+      # Accept the http-bridge bearer token — verify its signed JWTs locally via
+      # the shared secret (fallback: introspection at DIFF_BRIDGE_URL) — so the
+      # SPA's single login also authenticates /diff/*.
+      DIFF_BRIDGE_URL: http://http-bridge:8090
+      FILEENGINE_JWT_SECRET: ${FILEENGINE_JWT_SECRET:?set FILEENGINE_JWT_SECRET (see .env.example)}
+      FILEENGINE_GRPC_HOST: core
+      FILEENGINE_GRPC_PORT: "50051"
+      # The principal diff renditions are written as. Every comparison is still
+      # authorized as the requesting user first (per-user CheckPermission); this
+      # identity only owns the resulting rendition, exactly as folder_actions
+      # owns the mutations its actions make.
+      FILEENGINE_DIFF_TENANT: ${DEFAULT_TENANT:-default}
+      FILEENGINE_DIFF_USER: ${DIFF_PRINCIPAL_USER:-${LDAP_ADMIN_EMAIL}}
+      FILEENGINE_DIFF_PASSWORD: ${DIFF_PRINCIPAL_PASSWORD:-${LDAP_ADMIN_PASSWORD}}
+      FILEENGINE_LDAP_ENDPOINT: ${LDAP_ENDPOINT}
+      FILEENGINE_LDAP_DOMAIN: ${LDAP_DOMAIN}
+      FILEENGINE_REDIS_HOST: redis
+      FILEENGINE_REDIS_PORT: "6379"
+      FILEENGINE_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # Comparison is CPU-bound and can be slow on large drawings/models; these
+      # are the two knobs worth tuning per host.
+      DIFF_WORKER_CONCURRENCY: ${DIFF_WORKER_CONCURRENCY:-2}
+      DIFF_TIMEOUT_S: ${DIFF_TIMEOUT_S:-120}
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import socket,sys; socket.create_connection(('localhost',8100),3)\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  # The event worker: builds diff renditions off fileengine:events as new versions
+  # land, so a comparison is usually already cached when the user asks for it.
+  difference-consumer:
+    image: fileengine-difference:${VERSION:-1.5.0}
+    depends_on:
+      difference:
+        condition: service_healthy
+      core:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *diff-env
+    command: ["difference-consumer"]
+    restart: unless-stopped
+
+  # Periodic backfill — catches versions whose events were missed during an outage
+  # or dropped past the stream's retention window.
+  difference-reconcile:
+    image: fileengine-difference:${VERSION:-1.5.0}
+    depends_on:
+      difference:
+        condition: service_healthy
+      core:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *diff-env
+    command: ["difference-reconcile"]
+    restart: unless-stopped
+
   # ldap-manager — tenant user/role admin API + self-service profile/password.
   # Talks LDAP (writes to the master), Postgres (email templates), Redis (invite/
   # reset tokens) and SMTP. Reached via nginx at /ldapadmin; reuses the SPA's
   # http-bridge bearer token.
   ldap-manager:
-    image: fileengine-ldap-manager:${VERSION:-1.4.1}
+    image: fileengine-ldap-manager:${VERSION:-1.5.0}
     build:
       context: images/ldap-manager
       dockerfile: Dockerfile
@@ -762,7 +847,7 @@ services:
   # nginx — TLS termination, SPA serving, per-tenant subdomain routing. The ONLY
   # service that publishes host ports.
   nginx:
-    image: fileengine-nginx:${VERSION:-1.4.1}
+    image: fileengine-nginx:${VERSION:-1.5.0}
     build:
       context: images/nginx
       dockerfile: Dockerfile
