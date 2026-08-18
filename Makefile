@@ -67,7 +67,7 @@ define stage_rpm
 	cp -v "$$f" $(RPMS_DIR)/;
 endef
 
-.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference base-image publish clean
+.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference stage-ifc base-image publish clean
 
 # Image set (fileengine-<name>:$(VERSION)); used by `publish`.
 IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager discussion folder-actions difference nginx ldap
@@ -84,7 +84,7 @@ help:
 	@echo "  make stage-discussion  Stage the discussion (comments) service source"
 	@echo "  make stage-folder-actions  Stage the folder_actions service source"
 	@echo "  make stage-difference  Stage the difference_service source"
-	@echo "                       (pass IFC_RPM_DIR=... to enable IFC GlobalId matching)"
+	@echo "  make stage-ifc IFC_RPM_DIR=<dir>   Stage IfcOpenShell RPMs (REQUIRED by csai)"
 	@echo "  make base-image    Build the shared base image ($(BASE_IMAGE))"
 	@echo "  make publish REGISTRY=<host/ns>   Tag + push all fileengine-*:$(VERSION) to a registry"
 	@echo "  make clean         Remove staged rpms/ + spa/ artifacts"
@@ -217,6 +217,34 @@ stage-difference:
 	  echo "  (no IFC_RPM_DIR set: IFC compares by geometry, not GlobalId)"; \
 	fi
 	@find images/difference/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
+
+# --- IfcOpenShell RPMs (supplied out-of-band) ------------------------------
+
+# IfcOpenShell is not packaged for Fedora and is not vendored here, so its RPMs
+# are built separately and staged in. Two images consume them:
+#
+#   csai        REQUIRES them — its Dockerfile installs them unconditionally, so
+#               without this step `docker compose build csai` fails at COPY.
+#   difference  OPTIONAL — enables the IFC GlobalId object matcher; without it
+#               IFC still compares by geometry, one tier down.
+#
+# Build them from an IfcOpenShell checkout with its own Fedora script:
+#   cd /path/to/IfcOpenShell && INSTALL_DEPS=0 ./fedora/build-rpm.sh
+#   # -> artifacts in build-fedora/assets/
+# then stage them here:
+#   make stage-ifc IFC_RPM_DIR=/path/to/IfcOpenShell/build-fedora/assets
+#
+# Run AFTER stage-difference — that target wipes images/difference/build-src.
+IFC_RPMS_DIR := $(CURDIR)/rpms/ifcopenshell
+
+stage-ifc:
+	@[ -n "$(IFC_RPM_DIR)" ] || { echo "!! set IFC_RPM_DIR=<dir containing IfcOpenShell RPMs>"; exit 1; }
+	@ls $(IFC_RPM_DIR)/*.rpm >/dev/null 2>&1 || { echo "!! no .rpm files in $(IFC_RPM_DIR)"; exit 1; }
+	@echo "==> staging IfcOpenShell RPMs from $(IFC_RPM_DIR)"
+	@mkdir -p $(IFC_RPMS_DIR) images/difference/build-src/ifc-rpms
+	@cp -v $(IFC_RPM_DIR)/*.rpm $(IFC_RPMS_DIR)/
+	@cp $(IFC_RPM_DIR)/*.rpm images/difference/build-src/ifc-rpms/
+	@echo "==> csai will now build; for difference add --build-arg INSTALL_IFC=1"
 
 # --- Base image ------------------------------------------------------------
 
