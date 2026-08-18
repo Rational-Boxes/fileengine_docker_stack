@@ -23,6 +23,7 @@ service talks over the internal compose network and is never exposed publicly.
 | `mcp` | MCP server for AI agents (`/mcp`) | internal |
 | `discussion` (+ consumer / mcp / digest) | document-anchored comments & review (`/discuss`) | internal `:8094/8095` |
 | `folder-actions` (+ consumer / reconcile) | event-driven folder actions (`/folder-actions`) | internal `:8099` |
+| `difference` (+ consumer / reconcile) | version-to-version comparison renditions (`/diff`) | internal `:8100` |
 | `ldap-manager` | tenant user/role admin + self-service (`/ldapadmin`) | internal `:8093` |
 | `onlyoffice` | Document Server for in-browser office editing (`docs.<base>`) | internal `:80` |
 | `postgres` (pgvector) | core metadata + CSAI vectors + discussion/folder-actions state | internal `:5432` |
