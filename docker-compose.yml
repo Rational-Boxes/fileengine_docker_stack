@@ -750,6 +750,10 @@ services:
       # are the two knobs worth tuning per host.
       DIFF_WORKER_CONCURRENCY: ${DIFF_WORKER_CONCURRENCY:-2}
       DIFF_TIMEOUT_S: ${DIFF_TIMEOUT_S:-120}
+      # MUST be non-zero for difference-reconcile. The service treats 0 (its own
+      # default) as "sweep once and exit", which under `restart: unless-stopped`
+      # is an endless restart loop rather than a periodic sweep.
+      DIFF_RECONCILE_INTERVAL_S: ${DIFF_RECONCILE_INTERVAL_S:-900}
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import socket,sys; socket.create_connection(('localhost',8100),3)\" || exit 1"]
       interval: 10s
