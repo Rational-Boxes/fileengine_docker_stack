@@ -439,7 +439,9 @@ services:
       MCP_READ_ONLY: ${MCP_READ_ONLY:-0}
       MCP_ALLOW_DELETE: ${MCP_ALLOW_DELETE:-0}
     healthcheck:
-      test: ["CMD-SHELL", "python3 -c \"import socket,sys; socket.create_connection(('localhost',8089),3)\" || exit 1"]
+      # /healthz rather than a bare TCP connect: the socket is accepted by the
+      # listener and says nothing about whether the app behind it still serves.
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8089/healthz', timeout=3).status==200 else 1)\" || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
