@@ -844,8 +844,12 @@ services:
       FILEENGINE_LDAP_DOMAIN: ${LDAP_DOMAIN}
       FILEENGINE_LDAP_USER_BASE: ${LDAP_USER_BASE:-ou=users,${LDAP_DOMAIN}}
       FILEENGINE_LDAP_TENANT_BASE: ${LDAP_TENANT_BASE:-ou=tenants,${LDAP_DOMAIN}}
-      FILEENGINE_LDAP_BIND_DN: ${LDAP_ADMIN_DN}
-      FILEENGINE_LDAP_BIND_PASSWORD: ${LDAP_ADMIN_PASSWORD}
+      # LDAP_BIND_DN / LDAP_BIND_PASSWORD, matching every other service —
+      # LDAP_ADMIN_* is the app-admin ACCOUNT, not the directory bind, and
+      # using it here resolved to a blank DN and would have failed every role
+      # lookup at run time.
+      FILEENGINE_LDAP_BIND_DN: ${LDAP_BIND_DN:-}
+      FILEENGINE_LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:-}
       # The recipient one-time code is issued and checked by ldap_manager, which
       # owns the token store — a code minted on one replica must be verifiable
       # on another, so it cannot live in this service's memory.
@@ -921,6 +925,17 @@ services:
       FILEENGINE_JWT_SECRET: ${FILEENGINE_JWT_SECRET:?set FILEENGINE_JWT_SECRET (see .env.example)}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/3
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${CSAI_DB}
+      # The share-link OTP seam. share_service asks this service to issue and
+      # check a recipient's one-time code, because the token store lives here:
+      # a code minted on one replica must be verifiable on another, so it
+      # cannot live in share_service's memory.
+      #
+      # THE SECRET MUST MATCH share_service's. Unset, `require_internal`
+      # answers 404 ("internal share API not enabled") — which share_service
+      # then reports to the recipient as the uniform "this link isn't
+      # available", so the symptom is a share feature where links mint and peek
+      # but no code ever arrives, with nothing pointing at this variable.
+      SHARE_INTERNAL_SECRET: ${SHARE_INTERNAL_SECRET:-${MFA_INTERNAL_SECRET:-}}
       # Email / invites / reset.
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
