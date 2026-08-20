@@ -26,6 +26,7 @@ images/ldap-manager/build-src/
 images/discussion/build-src/
 images/folder-actions/build-src/
 images/difference/build-src/
+images/share/build-src/
 
 # Runtime data / volumes
 data/
@@ -46,3 +47,9 @@ logs/
 # OS cruft
 .DS_Store
 Thumbs.db
+
+# IfcOpenShell RPMs are supplied out-of-band (Makefile: "not packaged for Fedora
+# and is not vendored here") and are ~73 MB each. They are staged into the csai
+# and difference images at build time from IFC_RPM_DIR; committing them would
+# vendor by accident what the build deliberately does not.
+rpms/ifcopenshell/
