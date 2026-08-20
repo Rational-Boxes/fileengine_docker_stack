@@ -21,7 +21,10 @@
 #                        the bind DN is used as a schema placeholder (groupOfNames
 #                        requires >=1 member); replace it via the admin UI.
 #   --roles "a b c"      Role groups to create (default: "users contributors
-#                        administrators system_admin"; or $TENANT_ROLES).
+#                        administrators system_admin share_external"; or $TENANT_ROLES).
+#                        share_external gates outside share-link creation and is
+#                        created empty on purpose -- membership is granted, never
+#                        defaulted (share_service spec §8.1).
 #   --endpoint <uri>     LDAP URI         (FILEENGINE_LDAP_ENDPOINT)
 #   --domain <dn>        Base domain DN   (FILEENGINE_LDAP_DOMAIN)
 #   --bind-dn <dn>       Bind DN          (FILEENGINE_LDAP_BIND_DN)
@@ -41,7 +44,7 @@ BIND_DN="${FILEENGINE_LDAP_BIND_DN:-cn=admin,${DOMAIN}}"
 BIND_PW="${FILEENGINE_LDAP_BIND_PASSWORD:-}"
 TENANT_BASE="${FILEENGINE_LDAP_TENANT_BASE:-ou=tenants,${DOMAIN}}"
 USER_BASE="${FILEENGINE_LDAP_USER_BASE:-ou=users,${DOMAIN}}"
-ROLES_DEFAULT="${TENANT_ROLES:-users contributors administrators system_admin}"
+ROLES_DEFAULT="${TENANT_ROLES:-users contributors administrators system_admin share_external}"
 CONTAINER="${LDAP_CONTAINER:-}"
 
 ADMIN_EMAIL=""
