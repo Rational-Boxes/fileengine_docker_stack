@@ -30,7 +30,7 @@ db_exists()  { [ "$(psql_admin -d postgres -tAc "SELECT 1 FROM pg_database WHERE
 echo "db-init: waiting for postgres at $PGHOST:$PGPORT ..."
 until pg_isready -h "$PGHOST" -p "$PGPORT" -U "$POSTGRES_USER" >/dev/null 2>&1; do sleep 1; done
 
-for db in "$CORE_DB" "$CSAI_DB" "$DISC_DB" "$FA_DB"; do
+for db in "$CORE_DB" "$CSAI_DB" "$DISC_DB" "$FA_DB" "$SHARE_DB"; do
   if db_exists "$db"; then
     echo "db-init: database '$db' already exists"
   else

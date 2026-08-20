@@ -5,8 +5,8 @@
 #     neither automatically),
 #   - add ou=users (uid=email), ou=tenants, and the default tenant OU with its
 #     role groups (groupOfNames: users / contributors / administrators /
-#     system_admin),
-#   - add the initial admin user as a member of all four default-tenant groups.
+#     system_admin / share_external),
+#   - add the initial admin user as a member of all five default-tenant groups.
 #
 # New tenants are added later with scripts/new-tenant.sh. Per-tenant DB schemas /
 # storage are created by the core on first access.
@@ -87,6 +87,12 @@ dn: cn=system_admin,ou=${TENANT},${TENANT_BASE}
 objectClass: top
 objectClass: groupOfNames
 cn: system_admin
+member: ${ADMIN_DN}
+
+dn: cn=share_external,ou=${TENANT},${TENANT_BASE}
+objectClass: top
+objectClass: groupOfNames
+cn: share_external
 member: ${ADMIN_DN}
 LDIF
 )"

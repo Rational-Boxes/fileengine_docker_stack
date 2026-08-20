@@ -21,7 +21,7 @@ FRONTEND_DIR := $(ROOT)/frontend
 
 # Stack release version — tags the built images (fileengine-*:$(VERSION)) and the
 # shared base image. Independent of the component RPM versions below.
-VERSION  ?= 1.5.0
+VERSION  ?= 1.6.0
 
 # Per-component RPM versions. The source repos version independently (core moved
 # to 2.x; the bridges are on 1.x), so each is selected separately when staging.
@@ -67,10 +67,10 @@ define stage_rpm
 	cp -v "$$f" $(RPMS_DIR)/;
 endef
 
-.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference stage-ifc base-image publish clean
+.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference stage-share stage-ifc base-image publish clean
 
 # Image set (fileengine-<name>:$(VERSION)); used by `publish`.
-IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager discussion folder-actions difference nginx ldap
+IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager discussion folder-actions difference share nginx ldap
 
 help:
 	@echo "Unified FileEngine stack — Phase 1 build pipeline"
@@ -84,13 +84,14 @@ help:
 	@echo "  make stage-discussion  Stage the discussion (comments) service source"
 	@echo "  make stage-folder-actions  Stage the folder_actions service source"
 	@echo "  make stage-difference  Stage the difference_service source"
+	@echo "  make stage-share       Stage the share_service source"
 	@echo "  make stage-ifc IFC_RPM_DIR=<dir>   Stage IfcOpenShell RPMs (REQUIRED by csai)"
 	@echo "  make base-image    Build the shared base image ($(BASE_IMAGE))"
 	@echo "  make publish REGISTRY=<host/ns>   Tag + push all fileengine-*:$(VERSION) to a registry"
 	@echo "  make clean         Remove staged rpms/ + spa/ artifacts"
 
-build: rpms spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference
-	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/ + mcp/ + ldap-manager/ + discussion/ + folder-actions/ + difference/ build-src"
+build: rpms spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference stage-share
+	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/ + mcp/ + ldap-manager/ + discussion/ + folder-actions/ + difference/ + share/ build-src"
 
 # --- FileEngine RPMs -------------------------------------------------------
 
@@ -217,6 +218,27 @@ stage-difference:
 	  echo "  (no IFC_RPM_DIR set: IFC compares by geometry, not GlobalId)"; \
 	fi
 	@find images/difference/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
+
+# --- Share build source (staged for the fileengine-share image) -------------
+#
+# Three packages, and audit_service is not optional: the core attributes
+# delegated activity to the link CREATOR, so the audit chain is the only record
+# that an access was external. Without a publisher the service refuses to mint
+# or redeem anything, so an image built without it is a dead container rather
+# than a degraded one.
+#
+#   make stage-share
+stage-share:
+	@echo "==> staging share_service + python_interface + audit_service into images/share/build-src"
+	@rm -rf images/share/build-src
+	@mkdir -p images/share/build-src
+	@cp -r $(ROOT)/share_service images/share/build-src/share_service
+	@cp -r $(ROOT)/python_interface images/share/build-src/python_interface
+	@cp -r $(ROOT)/audit_service images/share/build-src/audit_service
+	@# The service's own .env carries dev credentials and must never reach a
+	@# published image; compose supplies configuration at run time.
+	@rm -f images/share/build-src/share_service/.env
+	@find images/share/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
 
 # --- IfcOpenShell RPMs (supplied out-of-band) ------------------------------
 
