@@ -41,11 +41,50 @@ internal compose network. Each tenant `<t>` of `BASE_DOMAIN` gets:
 Tenant names contain **no hyphen**, so the SPA host and the `-drive` host never
 collide.
 
-One **non-tenant** host is also served: `docs.<base>` → the ONLYOFFICE Document
-Server (in-browser office editing). It's a single shared editor host across
-tenants, so it needs the same `*.<base>` wildcard DNS/cert. Set
-`ONLYOFFICE_JWT_SECRET` in `.env`; editing requires `TLS_MODE` other than `none`
-(the browser loads `https://docs.<base>`).
+Two **non-tenant** hosts are also served, both covered by the same `*.<base>`
+wildcard DNS/cert:
+
+| Host | Serves |
+|------|--------|
+| `login.<base>` | The shared sign-in origin (see below) |
+| `docs.<base>` | ONLYOFFICE Document Server (in-browser office editing) |
+
+For the editor, set `ONLYOFFICE_JWT_SECRET` in `.env`; editing requires
+`TLS_MODE` other than `none` (the browser loads `https://docs.<base>`).
+
+### The shared sign-in origin
+
+`login.<base>` is a **reserved label**: it never resolves to a tenant. A
+signed-out visitor to any tenant host is sent here, signs in once, and is handed
+back to a workspace they belong to.
+
+The point is OAuth. Every provider is registered with **one** redirect URI and
+`OAUTH_RETURN_ALLOWLIST` holds **one** entry, however many tenants exist —
+instead of both growing per tenant and needing a bridge restart each time.
+
+```sh
+LOGIN_SUBDOMAIN=login       # .env — the default
+```
+
+Configurable because a deployment may be unable to reserve `login` on its
+domain. Whatever you choose:
+
+- **It must not contain a hyphen.** The leading DNS label is split on `-` to
+  separate `<tenant>-<interface>` — the rule behind `<t>-drive` — so
+  `acme-login` would resolve to the *tenant* `acme` and the sign-in origin would
+  double as a tenant host. The bridge refuses to start on a label it could never
+  match, rather than reserving nothing and saying nothing about it.
+- `OAUTH_REDIRECT_BASE` and `OAUTH_RETURN_ALLOWLIST` derive from it, so they
+  follow automatically unless you set them explicitly.
+- The SPA learns the label from the bridge at run time, so one prebuilt image
+  serves deployments that use different labels.
+
+After signing in, the SPA sends the user on to their workspace's own origin —
+but only after checking that origin is serving the app. A tenant whose subdomain
+is not reachable is served from the sign-in origin instead, with the tenant
+carried in `X-Tenant`. Nothing is broken when that happens; it just does not
+leave `login.<base>`. With wildcard DNS in place, every tenant is reachable and
+the forward is the normal path.
 
 ## Deploy
 
@@ -53,10 +92,11 @@ tenants, so it needs the same `*.<base>` wildcard DNS/cert. Set
 # 1. Configure (no secrets are auto-generated — set them all).
 cp .env.example .env && $EDITOR .env        # BASE_DOMAIN, S3_*, passwords, AT_REST_KEY, …
 
-# 2. Build artifacts (RPMs with Redis events ON, the subdomain-aware SPA, and
-#    stage the Python service sources). Pass your domain so the SPA is built
-#    subdomain-aware.
-make build BASE_DOMAIN=host.com
+# 2. Build artifacts (RPMs with Redis events ON, the SPA, and stage the Python
+#    service sources). No domain needed: the SPA reads tenancy from the request
+#    host and learns the sign-in label from the bridge, both at RUN time, so one
+#    build serves any domain.
+make build
 
 # 3. Build the images (the shared base first, then the services).
 make base-image

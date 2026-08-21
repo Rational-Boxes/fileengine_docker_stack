@@ -51,8 +51,12 @@ STAGE_PRUNE := \( -name '.git' -o -name '__pycache__' -o -name '.venv' \
 	-o -name '*.iml' -o -name '.DS_Store' -o -name '*~' -o -name '*.swp' -o -name '*.swo' \
 	-o -name '.env' -o -name '.env.local' -o -name '*.log' -o -name '*.audit' \)
 
-# Built into the SPA at compile time (apex the tenants live under). Empty here so
-# a plain `make` works; set it for a real deployment: `make spa BASE_DOMAIN=host.com`.
+# Vestigial: passed to the SPA build as VITE_BASE_DOMAIN, which nothing in the
+# SPA reads any more. Tenancy comes from the request host and the sign-in label
+# from the bridge, both at run time — the same reason the OAuth provider list
+# stopped being a build-time variable: one image, many deployments. Kept so an
+# existing `make spa BASE_DOMAIN=…` invocation does not break; setting it has no
+# effect on the output.
 BASE_DOMAIN ?=
 
 # Image names.
@@ -80,7 +84,7 @@ help:
 	@echo "  make rpm-http      http-bridge RPM only"
 	@echo "  make rpm-webdav    webdav-bridge RPM only"
 	@echo "  make spa           Build the SPA, stage into images/nginx/spa/"
-	@echo "                       (pass BASE_DOMAIN=host.com for subdomain tenancy)"
+	@echo "                       (no domain needed — tenancy is resolved at run time)"
 	@echo "  make stage-discussion  Stage the discussion (comments) service source"
 	@echo "  make stage-folder-actions  Stage the folder_actions service source"
 	@echo "  make stage-difference  Stage the difference_service source"
@@ -119,8 +123,12 @@ rpm-webdav:
 
 # --- SPA -------------------------------------------------------------------
 
+# BASE_DOMAIN is passed through for compatibility but the SPA no longer reads it:
+# tenancy comes from the request host and the sign-in label from the bridge, both
+# at run time, so one build serves any domain. Baking a domain in was what made
+# the packaged image wrong for every deployment but the one it was built for.
 spa:
-	@echo "==> building SPA (same-origin /api,/csai; BASE_DOMAIN='$(BASE_DOMAIN)')"
+	@echo "==> building SPA (same-origin /api,/csai; tenancy resolved at run time)"
 	cd $(FRONTEND_DIR) && npm ci && VITE_BASE_DOMAIN=$(BASE_DOMAIN) npm run build
 	@mkdir -p $(SPA_DIR)
 	@rm -rf $(SPA_DIR:%=%)/* && cp -r $(FRONTEND_DIR)/dist/. $(SPA_DIR)/
