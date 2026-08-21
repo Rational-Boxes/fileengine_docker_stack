@@ -203,6 +203,46 @@ services:
       # (POST /v1/auth/refresh) keeps enforced roles close to LDAP.
       FILEENGINE_JWT_SECRET: ${FILEENGINE_JWT_SECRET:?set FILEENGINE_JWT_SECRET (see .env.example)}
       TOKEN_TTL_SECONDS: ${TOKEN_TTL_SECONDS:-900}
+      DOWNLOAD_TICKET_TTL_SECONDS: ${DOWNLOAD_TICKET_TTL_SECONDS:-30}
+
+      # --- the shared sign-in origin ------------------------------------
+      # A reserved DNS label that never resolves to a tenant. Every tenant
+      # subdomain sends a signed-out visitor to <LOGIN_SUBDOMAIN>.<base>, which
+      # authenticates once and hands the session back — so OAuth returns to ONE
+      # origin and OAUTH_RETURN_ALLOWLIST needs a single entry however many
+      # tenants exist.
+      #
+      # Configurable because a deployment may be unable to reserve "login" on
+      # its domain. It must contain no hyphen: the <tenant>-<interface>
+      # convention would split it, and nginx's tenant vhost regex excludes one
+      # anyway. The SPA reads this value from the bridge at run time, so a
+      # prebuilt image picks it up without a rebuild.
+      LOGIN_SUBDOMAIN: ${LOGIN_SUBDOMAIN:-login}
+
+      # --- OAuth2 / OIDC login (optional) --------------------------------
+      # Empty OAUTH_PROVIDERS disables federated login entirely, and the SPA
+      # then shows no provider buttons at all — it asks the bridge what is
+      # configured rather than guessing. See http_bridge/OAUTH_SETUP.md.
+      OAUTH_PROVIDERS: ${OAUTH_PROVIDERS:-}
+      # This bridge's public base URL. Every provider's callback is
+      # <base>/v1/auth/oauth/<provider>/callback, and nginx path-proxies /api
+      # on every host — so the sign-in origin is the natural choice, and it is
+      # the ONE redirect URI to register with each IdP.
+      OAUTH_REDIRECT_BASE: ${OAUTH_REDIRECT_BASE:-https://${LOGIN_SUBDOMAIN:-login}.${BASE_DOMAIN}/api}
+      # Where a completed sign-in may return to. With the shared origin this is
+      # one entry, not one per tenant. NEVER shorten it to a bare scheme:
+      # "https://" ends on a boundary and matches every URL, turning this into
+      # the open redirect it exists to prevent.
+      OAUTH_RETURN_ALLOWLIST: ${OAUTH_RETURN_ALLOWLIST:-https://${LOGIN_SUBDOMAIN:-login}.${BASE_DOMAIN}/}
+      # Per-provider credentials. Endpoints are built in for these three, so a
+      # client id and secret is all each needs (Microsoft also takes a tenant).
+      OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID:-}
+      OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET:-}
+      OAUTH_MICROSOFT_CLIENT_ID: ${OAUTH_MICROSOFT_CLIENT_ID:-}
+      OAUTH_MICROSOFT_CLIENT_SECRET: ${OAUTH_MICROSOFT_CLIENT_SECRET:-}
+      OAUTH_MICROSOFT_TENANT: ${OAUTH_MICROSOFT_TENANT:-common}
+      OAUTH_LINKEDIN_CLIENT_ID: ${OAUTH_LINKEDIN_CLIENT_ID:-}
+      OAUTH_LINKEDIN_CLIENT_SECRET: ${OAUTH_LINKEDIN_CLIENT_SECRET:-}
     healthcheck:
       test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/localhost/8090' || exit 1"]
       interval: 10s
