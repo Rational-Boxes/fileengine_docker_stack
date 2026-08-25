@@ -74,7 +74,7 @@ endef
 .PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference stage-share stage-ifc base-image publish clean
 
 # Image set (fileengine-<name>:$(VERSION)); used by `publish`.
-IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager discussion folder-actions difference share nginx ldap
+IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager discussion folder-actions difference share audit nginx ldap
 
 help:
 	@echo "Unified FileEngine stack — Phase 1 build pipeline"
@@ -94,8 +94,8 @@ help:
 	@echo "  make publish REGISTRY=<host/ns>   Tag + push all fileengine-*:$(VERSION) to a registry"
 	@echo "  make clean         Remove staged rpms/ + spa/ artifacts"
 
-build: rpms spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference stage-share
-	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/ + mcp/ + ldap-manager/ + discussion/ + folder-actions/ + difference/ + share/ build-src"
+build: rpms spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference stage-share stage-audit
+	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/ + mcp/ + ldap-manager/ + discussion/ + folder-actions/ + difference/ + share/ + audit/ build-src"
 
 # --- FileEngine RPMs -------------------------------------------------------
 
@@ -236,6 +236,15 @@ stage-difference:
 # than a degraded one.
 #
 #   make stage-share
+stage-audit:
+	@echo "==> staging audit_service into images/audit/build-src"
+	@rm -rf images/audit/build-src
+	@mkdir -p images/audit/build-src
+	@cp -r $(ROOT)/audit_service images/audit/build-src/audit_service
+	@# Dev credentials must never reach a published image.
+	@rm -f images/audit/build-src/audit_service/.env
+	@find images/audit/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
+
 stage-share:
 	@echo "==> staging share_service + python_interface + audit_service into images/share/build-src"
 	@rm -rf images/share/build-src

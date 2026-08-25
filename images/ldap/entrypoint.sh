@@ -21,13 +21,31 @@ start_cockpit() {
 
     base="${BASE_DOMAIN:-example.com}"
     mkdir -p /etc/cockpit
-    cat > /etc/cockpit/cockpit.conf <<EOF
+
+    # DO NOT clobber a config the operator supplied. The defaults below assume
+    # the console gets its OWN hostname (ldap-admin.<base>, UrlRoot=/), which is
+    # how the compose stack runs it. A deployment that instead proxies the
+    # console at a sub-path must set UrlRoot and Origins to match, and the only
+    # way to do that is to mount a cockpit.conf.
+    #
+    # Unconditionally writing this file broke that outright: the Ansible
+    # openldap role bind-mounts its sub-path version READ-ONLY, the redirect
+    # failed with "Read-only file system", and because this script runs under
+    # `set -e` the container exited 1 and crash-looped — so the DIRECTORY SERVER
+    # never started, over a console config file. Guarding the write keeps the
+    # image's defaults for everyone who does not care, and makes a mounted
+    # config authoritative for everyone who does.
+    if [ -f /etc/cockpit/cockpit.conf ]; then
+        echo "ldap: /etc/cockpit/cockpit.conf already present — keeping it"
+    else
+        cat > /etc/cockpit/cockpit.conf <<EOF
 [WebService]
 AllowUnencrypted = true
 ProtocolHeader = X-Forwarded-Proto
 Origins = https://ldap-admin.${base} http://ldap-admin.${base}
 UrlRoot = /
 EOF
+    fi
 
     ws=""
     for c in /usr/libexec/cockpit-ws /usr/lib/cockpit/cockpit-ws /usr/sbin/cockpit-ws; do
