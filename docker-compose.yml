@@ -758,6 +758,13 @@ services:
     build:
       context: images/difference
       dockerfile: Dockerfile
+      args:
+        # "auto": install IfcOpenShell if `make stage-ifc` put RPMs in the build
+        # context. IFC comparison HARD-FAILS without it (there is no geometry
+        # fallback — see the Dockerfile), and the flag defaulting to off is what
+        # shipped an image that could not compare a single .ifc file. Set
+        # DIFF_INSTALL_IFC=1 to make a missing RPM fail the build instead.
+        INSTALL_IFC: ${DIFF_INSTALL_IFC:-auto}
     depends_on:
       core:
         condition: service_healthy

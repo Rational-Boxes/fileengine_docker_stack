@@ -206,11 +206,12 @@ stage-folder-actions:
 # client (used for version content, permission checks and rendition writes, like
 # CSAI / discussion / folder-actions).
 #
-# It also stages an ifc-rpms/ directory. That directory is normally EMPTY and the
-# image builds fine that way — it exists so the COPY in the Dockerfile always has
-# a source. Populate it to enable the IFC GlobalId matcher:
+# It also stages an ifc-rpms/ directory. The image builds with it empty — it
+# exists so the COPY in the Dockerfile always has a source — but such an image
+# CANNOT COMPARE IFC AT ALL (not "at a lower tier": see the Dockerfile). Populate
+# it for any deployment that handles BIM:
 #   make stage-difference IFC_RPM_DIR=/path/to/ifcopenshell/rpms
-# and then build that image with --build-arg INSTALL_IFC=1.
+# The Dockerfile defaults to INSTALL_IFC=auto and picks them up on its own.
 IFC_RPM_DIR ?=
 
 stage-difference:
@@ -223,7 +224,7 @@ stage-difference:
 	  echo "==> staging IfcOpenShell RPMs from $(IFC_RPM_DIR)"; \
 	  cp -v $(IFC_RPM_DIR)/*.rpm images/difference/build-src/ifc-rpms/; \
 	else \
-	  echo "  (no IFC_RPM_DIR set: IFC compares by geometry, not GlobalId)"; \
+	  echo "  !! no IFC_RPM_DIR set: the difference image will NOT be able to compare IFC"; \
 	fi
 	@find images/difference/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
 
@@ -264,8 +265,11 @@ stage-share:
 #
 #   csai        REQUIRES them — its Dockerfile installs them unconditionally, so
 #               without this step `docker compose build csai` fails at COPY.
-#   difference  OPTIONAL — enables the IFC GlobalId object matcher; without it
-#               IFC still compares by geometry, one tier down.
+#   difference  REQUIRED to compare IFC at all. This used to say "optional —
+#               without it IFC still compares by geometry, one tier down", which
+#               is false: three_d.py routes IFC only to ifcopenshell, so without
+#               it every .ifc comparison fails outright. The image builds without
+#               the RPMs and cannot compare a single IFC file.
 #
 # Build them from an IfcOpenShell checkout with its own Fedora script:
 #   cd /path/to/IfcOpenShell && INSTALL_DEPS=0 ./fedora/build-rpm.sh
@@ -283,7 +287,7 @@ stage-ifc:
 	@mkdir -p $(IFC_RPMS_DIR) images/difference/build-src/ifc-rpms
 	@cp -v $(IFC_RPM_DIR)/*.rpm $(IFC_RPMS_DIR)/
 	@cp $(IFC_RPM_DIR)/*.rpm images/difference/build-src/ifc-rpms/
-	@echo "==> csai will now build; for difference add --build-arg INSTALL_IFC=1"
+	@echo "==> csai will now build; difference picks these up automatically (INSTALL_IFC=auto)"
 
 # --- Base image ------------------------------------------------------------
 
