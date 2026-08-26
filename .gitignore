@@ -27,6 +27,8 @@ images/discussion/build-src/
 images/folder-actions/build-src/
 images/difference/build-src/
 images/share/build-src/
+images/audit/build-src/
+images/bcf/build-src/
 
 # Runtime data / volumes
 data/
