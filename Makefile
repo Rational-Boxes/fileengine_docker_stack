@@ -71,10 +71,10 @@ define stage_rpm
 	cp -v "$$f" $(RPMS_DIR)/;
 endef
 
-.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference stage-share stage-ifc base-image publish clean
+.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference stage-share stage-bcf stage-ifc base-image publish clean
 
 # Image set (fileengine-<name>:$(VERSION)); used by `publish`.
-IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager discussion folder-actions difference share nginx ldap
+IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager discussion folder-actions difference share audit bcf nginx ldap
 
 help:
 	@echo "Unified FileEngine stack — Phase 1 build pipeline"
@@ -88,14 +88,15 @@ help:
 	@echo "  make stage-discussion  Stage the discussion (comments) service source"
 	@echo "  make stage-folder-actions  Stage the folder_actions service source"
 	@echo "  make stage-difference  Stage the difference_service source"
+	@echo "  make stage-bcf         Stage the bcf_services source"
 	@echo "  make stage-share       Stage the share_service source"
 	@echo "  make stage-ifc IFC_RPM_DIR=<dir>   Stage IfcOpenShell RPMs (REQUIRED by csai)"
 	@echo "  make base-image    Build the shared base image ($(BASE_IMAGE))"
 	@echo "  make publish REGISTRY=<host/ns>   Tag + push all fileengine-*:$(VERSION) to a registry"
 	@echo "  make clean         Remove staged rpms/ + spa/ artifacts"
 
-build: rpms spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference stage-share
-	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/ + mcp/ + ldap-manager/ + discussion/ + folder-actions/ + difference/ + share/ build-src"
+build: rpms spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference stage-share stage-audit stage-bcf
+	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/ + mcp/ + ldap-manager/ + discussion/ + folder-actions/ + difference/ + share/ + audit/ + bcf/ build-src"
 
 # --- FileEngine RPMs -------------------------------------------------------
 
@@ -206,11 +207,12 @@ stage-folder-actions:
 # client (used for version content, permission checks and rendition writes, like
 # CSAI / discussion / folder-actions).
 #
-# It also stages an ifc-rpms/ directory. That directory is normally EMPTY and the
-# image builds fine that way — it exists so the COPY in the Dockerfile always has
-# a source. Populate it to enable the IFC GlobalId matcher:
+# It also stages an ifc-rpms/ directory. The image builds with it empty — it
+# exists so the COPY in the Dockerfile always has a source — but such an image
+# CANNOT COMPARE IFC AT ALL (not "at a lower tier": see the Dockerfile). Populate
+# it for any deployment that handles BIM:
 #   make stage-difference IFC_RPM_DIR=/path/to/ifcopenshell/rpms
-# and then build that image with --build-arg INSTALL_IFC=1.
+# The Dockerfile defaults to INSTALL_IFC=auto and picks them up on its own.
 IFC_RPM_DIR ?=
 
 stage-difference:
@@ -223,7 +225,7 @@ stage-difference:
 	  echo "==> staging IfcOpenShell RPMs from $(IFC_RPM_DIR)"; \
 	  cp -v $(IFC_RPM_DIR)/*.rpm images/difference/build-src/ifc-rpms/; \
 	else \
-	  echo "  (no IFC_RPM_DIR set: IFC compares by geometry, not GlobalId)"; \
+	  echo "  !! no IFC_RPM_DIR set: the difference image will NOT be able to compare IFC"; \
 	fi
 	@find images/difference/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
 
@@ -236,6 +238,15 @@ stage-difference:
 # than a degraded one.
 #
 #   make stage-share
+stage-audit:
+	@echo "==> staging audit_service into images/audit/build-src"
+	@rm -rf images/audit/build-src
+	@mkdir -p images/audit/build-src
+	@cp -r $(ROOT)/audit_service images/audit/build-src/audit_service
+	@# Dev credentials must never reach a published image.
+	@rm -f images/audit/build-src/audit_service/.env
+	@find images/audit/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
+
 stage-share:
 	@echo "==> staging share_service + python_interface + audit_service into images/share/build-src"
 	@rm -rf images/share/build-src
@@ -248,6 +259,20 @@ stage-share:
 	@rm -f images/share/build-src/share_service/.env
 	@find images/share/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
 
+# --- BCF build source (staged for the fileengine-bcf image) -----------------
+
+# bcf_services is self-contained: it does NOT use the fileengine gRPC client
+# (nothing in src/bcf_service imports it), so unlike csai / discussion /
+# difference there is no python_interface to stage alongside it.
+stage-bcf:
+	@echo "==> staging bcf_services into images/bcf/build-src"
+	@rm -rf images/bcf/build-src
+	@mkdir -p images/bcf/build-src
+	@cp -r $(ROOT)/bcf_services images/bcf/build-src/bcf_services
+	@# Dev credentials must never reach a published image.
+	@rm -f images/bcf/build-src/bcf_services/.env
+	@find images/bcf/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
+
 # --- IfcOpenShell RPMs (supplied out-of-band) ------------------------------
 
 # IfcOpenShell is not packaged for Fedora and is not vendored here, so its RPMs
@@ -255,8 +280,11 @@ stage-share:
 #
 #   csai        REQUIRES them — its Dockerfile installs them unconditionally, so
 #               without this step `docker compose build csai` fails at COPY.
-#   difference  OPTIONAL — enables the IFC GlobalId object matcher; without it
-#               IFC still compares by geometry, one tier down.
+#   difference  REQUIRED to compare IFC at all. This used to say "optional —
+#               without it IFC still compares by geometry, one tier down", which
+#               is false: three_d.py routes IFC only to ifcopenshell, so without
+#               it every .ifc comparison fails outright. The image builds without
+#               the RPMs and cannot compare a single IFC file.
 #
 # Build them from an IfcOpenShell checkout with its own Fedora script:
 #   cd /path/to/IfcOpenShell && INSTALL_DEPS=0 ./fedora/build-rpm.sh
@@ -274,7 +302,7 @@ stage-ifc:
 	@mkdir -p $(IFC_RPMS_DIR) images/difference/build-src/ifc-rpms
 	@cp -v $(IFC_RPM_DIR)/*.rpm $(IFC_RPMS_DIR)/
 	@cp $(IFC_RPM_DIR)/*.rpm images/difference/build-src/ifc-rpms/
-	@echo "==> csai will now build; for difference add --build-arg INSTALL_IFC=1"
+	@echo "==> csai will now build; difference picks these up automatically (INSTALL_IFC=auto)"
 
 # --- Base image ------------------------------------------------------------
 

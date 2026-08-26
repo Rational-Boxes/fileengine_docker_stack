@@ -30,6 +30,35 @@ RUN set -eux; \
       chromium; \
     dnf clean all; rm -rf /var/cache/dnf
 
+# --- Make OpenCASCADE's DRAWEXE actually usable ------------------------------
+#
+# opencascade-draw installs DRAWEXE, but two packaging gaps leave it inert, and
+# BOTH fail silently: DRAWEXE exits 0 having done nothing, so the plugin's
+# fail-soft path reports "no rendition" with no error anywhere. The symptom is
+# STEP/IGES/BREP/OBJ/VRML files that upload and index fine but never get a 3D
+# preview — while IFC works, because IFC goes through IfcOpenShell/convert2xkt
+# and never touches DRAWEXE.
+#
+# 1. CASROOT is unset, and DRAWEXE looks for $CASROOT/src/DrawResources while
+#    Fedora ships them under $CASROOT/resources/DrawResources. Without it:
+#      couldn't read file ".../src/DrawResources/DrawDefault"
+#
+# 2. `pload` dlopen()s UNVERSIONED sonames (libTKDraw.so), but the runtime
+#    package ships only libTKDraw.so.7.9 — the plain .so symlinks come from
+#    opencascade-devel, which would drag in headers we do not want in a runtime
+#    image. Without them every OCCT command is undefined:
+#      invalid command name "ReadStep" / "incmesh" / "WriteGltf"
+RUN set -eux; \
+    ln -sfn /usr/share/opencascade/resources /usr/share/opencascade/src; \
+    cd /usr/lib64; \
+    for f in libTK*.so.*.*; do \
+      base="${f%%.so.*}"; \
+      [ -e "$base.so" ] || ln -sfn "$f" "$base.so"; \
+    done; \
+    ldconfig
+
+ENV CASROOT=/usr/share/opencascade
+
 # convert2xkt (xeokit-convert): the glTF/IFC/CityJSON/LAS/STL/PLY -> XKT hop, and
 # the final hop for the OpenCASCADE CAD path. The npm bin is "xeokit-convert"; we
 # also expose it under the conventional "convert2xkt" name (CSAI's default).
