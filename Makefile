@@ -159,11 +159,21 @@ stage-csai:
 
 # The ldap-manager image needs just the standalone FastAPI service (no gRPC
 # client — it talks LDAP/Postgres/Redis/SMTP directly).
+# audit_service is NOT optional here, for the same reason it is not optional for
+# share: ldap_manager emits the auth-category audit events — sign-in, password
+# set/reset, user create, role grant — and AuditEmitter treats an unimportable
+# publisher as "auditing is off", returning True so a fail-closed caller does not
+# block. Leave the package out and the write-ahead guards on credential changes
+# become no-ops that still look like they passed.
 stage-ldap-manager:
-	@echo "==> staging ldap_manager source into images/ldap-manager/build-src"
+	@echo "==> staging ldap_manager + audit_service into images/ldap-manager/build-src"
 	@rm -rf images/ldap-manager/build-src
 	@mkdir -p images/ldap-manager/build-src
 	@cp -r $(ROOT)/ldap_manager images/ldap-manager/build-src/ldap_manager
+	@cp -r $(ROOT)/audit_service images/ldap-manager/build-src/audit_service
+	@# The service's own .env carries dev credentials and must never reach a
+	@# published image; compose supplies configuration at run time.
+	@rm -f images/ldap-manager/build-src/ldap_manager/.env
 	@find images/ldap-manager/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
 
 # --- MCP build source (staged for the fileengine-mcp image) ----------------
