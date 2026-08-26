@@ -842,6 +842,58 @@ services:
     command: ["difference-reconcile"]
     restart: unless-stopped
 
+  # bcf_services — the openBIM (BCF) door: BCF-API for desktop BIM issue managers
+  # and the BCF-XML (.bcfzip) import/export the SPA's markup view calls.
+  #
+  # An ADAPTER, not a second issue database: topics live in the discussion store
+  # and the core file store. The BCF projection tables it will eventually own are
+  # a later phase, and the BCF-XML endpoints are stateless — topics arrive in the
+  # request body and a .bcfzip comes back — so this needs no schema today. The
+  # Postgres/Redis settings are wired now so the phase that uses them is config,
+  # not a compose change.
+  bcf:
+    image: fileengine-bcf:${VERSION:-1.7.1}
+    build:
+      context: images/bcf
+      dockerfile: Dockerfile
+    depends_on:
+      core:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ldap-init:
+        condition: service_completed_successfully
+    environment:
+      BCF_HTTP_HOST: 0.0.0.0
+      BCF_HTTP_PORT: "8098"
+      FILEENGINE_GRPC_HOST: core
+      FILEENGINE_GRPC_PORT: "50051"
+      FILEENGINE_PG_HOST: ${POSTGRES_HOST:-postgres}
+      FILEENGINE_PG_PORT: "${POSTGRES_PORT:-5432}"
+      FILEENGINE_PG_DATABASE: ${CORE_DB}
+      FILEENGINE_PG_USER: ${POSTGRES_USER}
+      FILEENGINE_PG_PASSWORD: ${POSTGRES_PASSWORD}
+      FILEENGINE_REDIS_HOST: redis
+      FILEENGINE_REDIS_PORT: "6379"
+      FILEENGINE_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # Bearer auth: the service verifies the bridge's HS256 session JWTs itself
+      # with this secret, so the SPA's single login also authenticates /bcf/*.
+      FILEENGINE_JWT_SECRET: ${FILEENGINE_JWT_SECRET:?set FILEENGINE_JWT_SECRET (see .env.example)}
+      # The key:secret door for non-interactive desktop BCF managers (scope "bcf"),
+      # verified via ldap_manager. Unset => Bearer-only, which is the safe default.
+      FILEENGINE_LDAP_MANAGER_URL: http://ldap-manager:8093
+      SERVICE_CRED_INTERNAL_SECRET: ${SERVICE_CRED_INTERNAL_SECRET:-${MFA_INTERNAL_SECRET:-}}
+      FILEENGINE_BCF_TENANT: ${DEFAULT_TENANT:-default}
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import socket,sys; socket.create_connection(('localhost',8098),3)\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
   # share_service — time- and use-bounded links for people OUTSIDE the tenant.
   #
   # THE ONLY SERVICE HERE WITH AN UNAUTHENTICATED SURFACE, and it is off by

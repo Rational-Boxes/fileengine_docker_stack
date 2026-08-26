@@ -71,10 +71,10 @@ define stage_rpm
 	cp -v "$$f" $(RPMS_DIR)/;
 endef
 
-.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference stage-share stage-ifc base-image publish clean
+.PHONY: help build rpms rpm-core rpm-http rpm-webdav spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference stage-share stage-bcf stage-ifc base-image publish clean
 
 # Image set (fileengine-<name>:$(VERSION)); used by `publish`.
-IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager discussion folder-actions difference share audit nginx ldap
+IMAGES := base core http-bridge webdav-bridge csai mcp ldap-manager discussion folder-actions difference share audit bcf nginx ldap
 
 help:
 	@echo "Unified FileEngine stack — Phase 1 build pipeline"
@@ -88,14 +88,15 @@ help:
 	@echo "  make stage-discussion  Stage the discussion (comments) service source"
 	@echo "  make stage-folder-actions  Stage the folder_actions service source"
 	@echo "  make stage-difference  Stage the difference_service source"
+	@echo "  make stage-bcf         Stage the bcf_services source"
 	@echo "  make stage-share       Stage the share_service source"
 	@echo "  make stage-ifc IFC_RPM_DIR=<dir>   Stage IfcOpenShell RPMs (REQUIRED by csai)"
 	@echo "  make base-image    Build the shared base image ($(BASE_IMAGE))"
 	@echo "  make publish REGISTRY=<host/ns>   Tag + push all fileengine-*:$(VERSION) to a registry"
 	@echo "  make clean         Remove staged rpms/ + spa/ artifacts"
 
-build: rpms spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference stage-share stage-audit
-	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/ + mcp/ + ldap-manager/ + discussion/ + folder-actions/ + difference/ + share/ + audit/ build-src"
+build: rpms spa stage-migrations stage-csai stage-mcp stage-ldap-manager stage-discussion stage-folder-actions stage-difference stage-share stage-audit stage-bcf
+	@echo "==> artifacts staged: rpms/ + spa/ + migrations/ + csai/ + mcp/ + ldap-manager/ + discussion/ + folder-actions/ + difference/ + share/ + audit/ + bcf/ build-src"
 
 # --- FileEngine RPMs -------------------------------------------------------
 
@@ -257,6 +258,20 @@ stage-share:
 	@# published image; compose supplies configuration at run time.
 	@rm -f images/share/build-src/share_service/.env
 	@find images/share/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
+
+# --- BCF build source (staged for the fileengine-bcf image) -----------------
+
+# bcf_services is self-contained: it does NOT use the fileengine gRPC client
+# (nothing in src/bcf_service imports it), so unlike csai / discussion /
+# difference there is no python_interface to stage alongside it.
+stage-bcf:
+	@echo "==> staging bcf_services into images/bcf/build-src"
+	@rm -rf images/bcf/build-src
+	@mkdir -p images/bcf/build-src
+	@cp -r $(ROOT)/bcf_services images/bcf/build-src/bcf_services
+	@# Dev credentials must never reach a published image.
+	@rm -f images/bcf/build-src/bcf_services/.env
+	@find images/bcf/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
 
 # --- IfcOpenShell RPMs (supplied out-of-band) ------------------------------
 
