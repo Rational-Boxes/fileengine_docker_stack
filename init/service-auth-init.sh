@@ -73,8 +73,26 @@ for service in "${!CAPS[@]}"; do
     # stdout is the secret and nothing else — the CLI silences the logger for
     # exactly this. Write via a temporary file so a service never reads a
     # half-written token.
+    # issue or rotate, and the difference matters. `issue` REFUSES to replace a
+    # credential in place — deliberately, because replacing would strand every
+    # running instance still presenting the old secret. So if the core already
+    # knows this service but the volume has no token for it (a wiped volume, an
+    # interrupted first run), issuing fails forever and the stack never starts.
+    #
+    # `rotate` adds a secret ALONGSIDE the existing one. Both stay valid, so
+    # anything still holding the old token keeps working until it restarts onto
+    # the new one. Retire the old with `service-token prune <service>` once
+    # everything has rolled over.
+    verb=issue
+    if fileengine_cli service-token list 2>/dev/null | awk '{print $1}' | grep -qx "$service"; then
+        verb=rotate
+        echo "  $service: credential exists but no token file — rotating"
+    fi
+
     tmp="$token_file.tmp"
-    if ! fileengine_cli service-token issue "$service" > "$tmp"; then
+    # Clear a temp left by a run that died between write and move.
+    rm -f "$tmp"
+    if ! fileengine_cli service-token "$verb" "$service" > "$tmp"; then
         echo "could not issue a credential for $service" >&2
         rm -f "$tmp"
         exit 1
