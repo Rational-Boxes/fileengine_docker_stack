@@ -135,6 +135,14 @@ services:
       FILEENGINE_PG_DATABASE: ${CORE_DB}
       FILEENGINE_PG_USER: ${POSTGRES_USER}
       FILEENGINE_PG_PASSWORD: ${POSTGRES_PASSWORD}
+      # --- gRPC bind address ---
+      # The core defaults to loopback, because it does not authenticate: it
+      # authorizes whatever identity the caller presents, so the port must only
+      # ever be reachable by the trusted bridges and feature services. Here we
+      # widen it deliberately — the peers are other containers, and the isolation
+      # comes from this compose network plus the fact that 50051 is never
+      # published to the host. Do not add a `ports:` entry for it.
+      FILEENGINE_GRPC_HOST: "0.0.0.0"
       # --- Local storage / cache tier ---
       FILEENGINE_STORAGE_BASE: /var/lib/fileengine/storage
       # --- At-rest crypto ---
