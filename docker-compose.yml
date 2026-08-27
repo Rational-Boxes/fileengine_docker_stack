@@ -165,6 +165,16 @@ services:
       FILEENGINE_REDIS_PORT: "6379"
       FILEENGINE_REDIS_PASSWORD: ${REDIS_PASSWORD}
       FILEENGINE_EVENTS_STREAM: ${EVENTS_STREAM:-fileengine:events}
+      # --- Service authentication ---
+      # Credentials are stored as HMAC(secret, pepper), and the pepper lives
+      # OUTSIDE the database on purpose: a stolen database dump then does not
+      # contain everything needed to forge a credential. It must match whatever
+      # issues the tokens — here, service-auth-init.
+      #
+      # There is no FILEENGINE_SERVICE_AUTH_REQUIRED here. It defaults to true,
+      # and the safe configuration being the default is the point; setting it to
+      # false is a migration escape hatch that warns on every start.
+      FILEENGINE_SERVICE_TOKEN_PEPPER: ${SERVICE_TOKEN_PEPPER:?set SERVICE_TOKEN_PEPPER in .env}
     volumes:
       - filecache:/var/lib/fileengine/storage
     healthcheck:
@@ -177,6 +187,46 @@ services:
       start_period: 25s
     restart: unless-stopped
 
+  # One credential per service, issued once, into a volume the services read at
+  # startup. A one-shot cannot inject environment variables into containers
+  # Compose has already defined — the tokens simply do not exist at `compose up`
+  # time — so they arrive as files instead. See
+  # PROPOSAL_service_authentication.md §3.7.
+  #
+  # It talks to PostgreSQL, not gRPC: issuing is a database write hashed under
+  # the pepper, so this needs the core's DB credentials and the same pepper, and
+  # needs no service identity of its own. It runs on the core image because that
+  # is what carries fileengine_cli.
+  #
+  # Idempotent, and re-runnable: an existing credential is left alone, so a
+  # `compose up` on a running stack does not invalidate the token a live service
+  # is holding.
+  service-auth-init:
+    image: fileengine-core:${VERSION:-1.7.1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      core:
+        # Waits for the core to be SERVING, not merely started: the schema this
+        # writes into is created by the core at startup.
+        condition: service_healthy
+    environment:
+      FILEENGINE_PG_HOST: ${POSTGRES_HOST:-postgres}
+      FILEENGINE_PG_PORT: "${POSTGRES_PORT:-5432}"
+      FILEENGINE_PG_DATABASE: ${CORE_DB}
+      FILEENGINE_PG_USER: ${POSTGRES_USER}
+      FILEENGINE_PG_PASSWORD: ${POSTGRES_PASSWORD}
+      FILEENGINE_SERVICE_TOKEN_PEPPER: ${SERVICE_TOKEN_PEPPER:?set SERVICE_TOKEN_PEPPER in .env}
+    volumes:
+      - ./init/service-auth-init.sh:/service-auth-init.sh:ro,Z
+      - servicetokens:/run/fileengine/tokens
+    # Root so the tokens it writes are readable by ten images that each run as a
+    # different unprivileged user; the files themselves are 0444 and the volume
+    # is internal to this stack. See the note in the script.
+    user: root
+    entrypoint: ["bash", "/service-auth-init.sh"]
+    restart: "no"
+
   # REST/auth proxy over the gRPC core (serves the SPA's /api). Internal only;
   # nginx (a later phase) terminates TLS and reverse-proxies to it.
   http-bridge:
@@ -185,12 +235,15 @@ services:
       context: .
       dockerfile: images/http-bridge/Dockerfile
     depends_on:
+      service-auth-init:
+        condition: service_completed_successfully
       core:
         condition: service_healthy
       ldap-init:
         condition: service_completed_successfully
     environment:
       FILEENGINE_GRPC_HOST: core
+      FILEENGINE_SERVICE_TOKEN_FILE: /run/fileengine/tokens/http_bridge
       FILEENGINE_GRPC_PORT: "50051"
       HTTP_HOST: 0.0.0.0
       HTTP_PORT: "8090"
@@ -251,6 +304,8 @@ services:
       OAUTH_MICROSOFT_TENANT: ${OAUTH_MICROSOFT_TENANT:-common}
       OAUTH_LINKEDIN_CLIENT_ID: ${OAUTH_LINKEDIN_CLIENT_ID:-}
       OAUTH_LINKEDIN_CLIENT_SECRET: ${OAUTH_LINKEDIN_CLIENT_SECRET:-}
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     healthcheck:
       test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/localhost/8090' || exit 1"]
       interval: 10s
@@ -267,12 +322,15 @@ services:
       context: .
       dockerfile: images/webdav-bridge/Dockerfile
     depends_on:
+      service-auth-init:
+        condition: service_completed_successfully
       core:
         condition: service_healthy
       ldap-init:
         condition: service_completed_successfully
     environment:
       FILEENGINE_GRPC_HOST: core
+      FILEENGINE_SERVICE_TOKEN_FILE: /run/fileengine/tokens/webdav_bridge
       FILEENGINE_GRPC_PORT: "50051"
       WEBDAV_HOST: 0.0.0.0
       WEBDAV_PORT: "8088"
@@ -284,6 +342,8 @@ services:
       FILEENGINE_LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:-}
       FILEENGINE_LDAP_TENANT_BASE: ${LDAP_TENANT_BASE:-}
       FILEENGINE_LDAP_USER_BASE: ${LDAP_USER_BASE:-}
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     healthcheck:
       test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/localhost/8088' || exit 1"]
       interval: 10s
@@ -332,6 +392,8 @@ services:
       args:
         INSTALL_DOCLING: ${INSTALL_DOCLING:-1}
     depends_on:
+      service-auth-init:
+        condition: service_completed_successfully
       core:
         condition: service_healthy
       db-init:
@@ -357,6 +419,7 @@ services:
       # must match the bridge's FILEENGINE_JWT_SECRET.
       FILEENGINE_JWT_SECRET: ${FILEENGINE_JWT_SECRET:?set FILEENGINE_JWT_SECRET (see .env.example)}
       FILEENGINE_GRPC_HOST: core
+      FILEENGINE_SERVICE_TOKEN_FILE: /run/fileengine/tokens/csai
       FILEENGINE_GRPC_PORT: "50051"
       FILEENGINE_CSAI_TENANT: ${DEFAULT_TENANT:-default}
       FILEENGINE_CSAI_USER: ${LDAP_ADMIN_EMAIL}
@@ -408,6 +471,8 @@ services:
       CSAI_ONLYOFFICE_CALLBACK_BASE: http://csai-app:8092
       CSAI_ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?set ONLYOFFICE_JWT_SECRET (see .env.example)}
     command: ["convert-search-ai"]
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8092/healthz').status==200 else 1)\" || exit 1"]
       interval: 10s
@@ -467,6 +532,8 @@ services:
       context: images/mcp
       dockerfile: Dockerfile
     depends_on:
+      service-auth-init:
+        condition: service_completed_successfully
       core:
         condition: service_healthy
       ldap-init:
@@ -475,6 +542,7 @@ services:
       MCP_HTTP_HOST: 0.0.0.0
       MCP_HTTP_PORT: "8089"
       FILEENGINE_GRPC_HOST: core
+      FILEENGINE_SERVICE_TOKEN_FILE: /run/fileengine/tokens/mcp
       FILEENGINE_GRPC_PORT: "50051"
       FILEENGINE_MCP_TENANT: ${DEFAULT_TENANT:-default}
       FILEENGINE_MCP_USER: ${LDAP_ADMIN_EMAIL}
@@ -487,6 +555,8 @@ services:
       FILEENGINE_LDAP_USER_BASE: ${LDAP_USER_BASE}
       MCP_READ_ONLY: ${MCP_READ_ONLY:-0}
       MCP_ALLOW_DELETE: ${MCP_ALLOW_DELETE:-0}
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     healthcheck:
       # /healthz rather than a bare TCP connect: the socket is accepted by the
       # listener and says nothing about whether the app behind it still serves.
@@ -506,6 +576,8 @@ services:
       context: images/discussion
       dockerfile: Dockerfile
     depends_on:
+      service-auth-init:
+        condition: service_completed_successfully
       core:
         condition: service_healthy
       db-init:
@@ -525,6 +597,7 @@ services:
       DISC_BRIDGE_URL: http://http-bridge:8090
       FILEENGINE_JWT_SECRET: ${FILEENGINE_JWT_SECRET:?set FILEENGINE_JWT_SECRET (see .env.example)}
       FILEENGINE_GRPC_HOST: core
+      FILEENGINE_SERVICE_TOKEN_FILE: /run/fileengine/tokens/discussion
       FILEENGINE_GRPC_PORT: "50051"
       # Default tenant + this service's own agent identity (internal maintenance
       # only; never an ACL bypass).
@@ -563,6 +636,8 @@ services:
       DISC_SMTP_USER: ${DISC_SMTP_USER:-}
       DISC_SMTP_PASSWORD: ${DISC_SMTP_PASSWORD:-}
     command: ["discussion"]
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import socket,sys; socket.create_connection(('localhost',8094),3)\" || exit 1"]
       interval: 10s
@@ -645,6 +720,8 @@ services:
       context: images/folder-actions
       dockerfile: Dockerfile
     depends_on:
+      service-auth-init:
+        condition: service_completed_successfully
       core:
         condition: service_healthy
       db-init:
@@ -662,6 +739,7 @@ services:
       FA_BRIDGE_URL: http://http-bridge:8090
       FILEENGINE_JWT_SECRET: ${FILEENGINE_JWT_SECRET:?set FILEENGINE_JWT_SECRET (see .env.example)}
       FILEENGINE_GRPC_HOST: core
+      FILEENGINE_SERVICE_TOKEN_FILE: /run/fileengine/tokens/folder_actions
       FILEENGINE_GRPC_PORT: "50051"
       # The dedicated action principal (§7.5). Every core mutation an action makes
       # runs as this identity, authorized at binding time — NOT as the user whose
@@ -714,6 +792,8 @@ services:
       FA_SMTP_FROM: ${FA_SMTP_FROM:-no-reply@${BASE_DOMAIN}}
       FA_FRONTEND_BASE_URL: ${FA_FRONTEND_BASE_URL:-}
     command: ["folder-actions"]
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import socket,sys; socket.create_connection(('localhost',8099),3)\" || exit 1"]
       interval: 10s
@@ -774,6 +854,8 @@ services:
         # DIFF_INSTALL_IFC=1 to make a missing RPM fail the build instead.
         INSTALL_IFC: ${DIFF_INSTALL_IFC:-auto}
     depends_on:
+      service-auth-init:
+        condition: service_completed_successfully
       core:
         condition: service_healthy
       ldap-init:
@@ -789,6 +871,7 @@ services:
       DIFF_BRIDGE_URL: http://http-bridge:8090
       FILEENGINE_JWT_SECRET: ${FILEENGINE_JWT_SECRET:?set FILEENGINE_JWT_SECRET (see .env.example)}
       FILEENGINE_GRPC_HOST: core
+      FILEENGINE_SERVICE_TOKEN_FILE: /run/fileengine/tokens/difference
       FILEENGINE_GRPC_PORT: "50051"
       # The principal diff renditions are written as. Every comparison is still
       # authorized as the requesting user first (per-user CheckPermission); this
@@ -810,6 +893,8 @@ services:
       # default) as "sweep once and exit", which under `restart: unless-stopped`
       # is an endless restart loop rather than a periodic sweep.
       DIFF_RECONCILE_INTERVAL_S: ${DIFF_RECONCILE_INTERVAL_S:-900}
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import socket,sys; socket.create_connection(('localhost',8100),3)\" || exit 1"]
       interval: 10s
@@ -865,6 +950,8 @@ services:
       context: images/bcf
       dockerfile: Dockerfile
     depends_on:
+      service-auth-init:
+        condition: service_completed_successfully
       core:
         condition: service_healthy
       postgres:
@@ -877,6 +964,7 @@ services:
       BCF_HTTP_HOST: 0.0.0.0
       BCF_HTTP_PORT: "8098"
       FILEENGINE_GRPC_HOST: core
+      FILEENGINE_SERVICE_TOKEN_FILE: /run/fileengine/tokens/bcf
       FILEENGINE_GRPC_PORT: "50051"
       FILEENGINE_PG_HOST: ${POSTGRES_HOST:-postgres}
       FILEENGINE_PG_PORT: "${POSTGRES_PORT:-5432}"
@@ -894,6 +982,8 @@ services:
       FILEENGINE_LDAP_MANAGER_URL: http://ldap-manager:8093
       SERVICE_CRED_INTERNAL_SECRET: ${SERVICE_CRED_INTERNAL_SECRET:-${MFA_INTERNAL_SECRET:-}}
       FILEENGINE_BCF_TENANT: ${DEFAULT_TENANT:-default}
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import socket,sys; socket.create_connection(('localhost',8098),3)\" || exit 1"]
       interval: 10s
@@ -918,6 +1008,8 @@ services:
       context: images/share
       dockerfile: Dockerfile
     depends_on:
+      service-auth-init:
+        condition: service_completed_successfully
       core:
         condition: service_healthy
       db-init:
@@ -946,6 +1038,7 @@ services:
       FILEENGINE_JWT_SECRET: ${FILEENGINE_JWT_SECRET:?set FILEENGINE_JWT_SECRET (see .env.example)}
       FILEENGINE_JWT_ISSUER: ${FILEENGINE_JWT_ISSUER:-fileengine-bridge}
       FILEENGINE_GRPC_HOST: core
+      FILEENGINE_SERVICE_TOKEN_FILE: /run/fileengine/tokens/share
       FILEENGINE_GRPC_PORT: "50051"
       FILEENGINE_LDAP_ENDPOINT: ${LDAP_ENDPOINT}
       FILEENGINE_LDAP_DOMAIN: ${LDAP_DOMAIN}
@@ -984,6 +1077,8 @@ services:
       SHARE_PUBLIC_BASE_URL: ${SHARE_PUBLIC_BASE_URL:-}
       SHARE_RETENTION_DAYS: ${SHARE_RETENTION_DAYS:-365}
       SHARE_RETENTION_TENANTS: ${SHARE_RETENTION_TENANTS:-}
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     healthcheck:
       # Probes the API port, not monitoring: monitoring is loopback-bound inside
       # the container and this runs there, but the API is what nginx fronts.
@@ -1099,6 +1194,10 @@ services:
     restart: unless-stopped
 
 volumes:
+  # Service credentials, written by service-auth-init and mounted read-only by
+  # every service that talks to the core. Never published, never bind-mounted to
+  # the host: the secrets stay inside the stack.
+  servicetokens:
   pgdata:
   redisdata:
   filecache:
