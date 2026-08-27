@@ -34,10 +34,18 @@ WORKDIR /app
 COPY build-src/audit_service/pyproject.toml build-src/audit_service/README.md /app/audit_service/
 COPY build-src/audit_service/src/ /app/audit_service/src/
 
+# The gRPC client. audit-accountability reads the core's accountability records
+# over gRPC — that is the GUARANTEE path for core security records, deliberately
+# not the Redis stream — so the generated stubs have to be present or that entry
+# point fails on import. grpcio alone is not enough: it arrives as a dependency
+# and makes the gap invisible until the container is actually started.
+COPY build-src/python_interface/ /app/python_interface/
+
 # [api] pulls FastAPI + uvicorn for audit-api; [retention] pulls cryptography +
 # boto3 for the archival job. Both are installed so one image serves every role
 # — the alternative is several near-identical images differing by one extra.
 RUN set -eux; \
+    pip3 install --no-cache-dir /app/python_interface; \
     pip3 install --no-cache-dir "/app/audit_service[api,retention]"
 
 # Monitoring convention, as everywhere else: the API binds all interfaces inside

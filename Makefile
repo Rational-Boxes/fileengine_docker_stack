@@ -248,11 +248,16 @@ stage-difference:
 # than a degraded one.
 #
 #   make stage-share
+# python_interface goes in alongside: audit-accountability pulls the core's
+# guaranteed accountability records over gRPC, and without the generated stubs
+# that entry point dies on import the moment the container starts. The image
+# already carried grpcio, which made the gap look closed from the outside.
 stage-audit:
-	@echo "==> staging audit_service into images/audit/build-src"
+	@echo "==> staging audit_service + python_interface into images/audit/build-src"
 	@rm -rf images/audit/build-src
 	@mkdir -p images/audit/build-src
 	@cp -r $(ROOT)/audit_service images/audit/build-src/audit_service
+	@cp -r $(ROOT)/python_interface images/audit/build-src/python_interface
 	@# Dev credentials must never reach a published image.
 	@rm -f images/audit/build-src/audit_service/.env
 	@find images/audit/build-src $(STAGE_PRUNE) -prune -exec rm -rf {} + 2>/dev/null || true
