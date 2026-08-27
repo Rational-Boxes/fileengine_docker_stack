@@ -6,8 +6,16 @@
 # the fileengine-libs RPM Requires hiredis, so the events path is wired.
 FROM fileengine-base:1.2.0
 
+# The CLI is installed alongside the server, not because the container runs it
+# as a command, but because credential administration happens INSIDE this
+# container: service-auth-init issues tokens via `podman/docker exec ...
+# fileengine_cli`, and the Ansible service_auth role does the same on the host.
+# Issuing is a database write hashed under the pepper, and the pepper is already
+# in this container's environment — so doing it here means the pepper does not
+# have to exist in a second place that can drift from the first.
 COPY rpms/fileengine/fileengine-libs-*.rpm \
      rpms/fileengine/fileengine-server-*.rpm \
+     rpms/fileengine/fileengine-cli-*.rpm \
      /tmp/rpms/
 RUN set -eux; \
     dnf -y install /tmp/rpms/*.rpm; \
