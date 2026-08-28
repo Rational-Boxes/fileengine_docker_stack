@@ -455,7 +455,21 @@ services:
       CSAI_WEB_SEARCH_DEFAULT: ${CSAI_WEB_SEARCH_DEFAULT:-false}
       CSAI_WEB_SEARCH_PROVIDER: ${CSAI_WEB_SEARCH_PROVIDER:-duckduckgo}
       CSAI_WEB_SEARCH_RESULTS: ${CSAI_WEB_SEARCH_RESULTS:-5}
-      CSAI_WEB_MAX_ITERATIONS: ${CSAI_WEB_MAX_ITERATIONS:-3}
+      # Caps EVERY tool round, not just web search — document_search,
+      # get_document_text and list_folders spend the same allowance, so it binds
+      # with web search off. At 3 the loop hit its cap on every single turn and
+      # fell through to a tool-free completion, which is how a chat answers with
+      # "Let me search for more details…" and then stops.
+      CSAI_WEB_MAX_ITERATIONS: ${CSAI_WEB_MAX_ITERATIONS:-10}
+      # Answer-shaping guardrails, previously reachable only by rebuilding the
+      # image. DOC_TEXT_WINDOW is what the paged document reader returns when the
+      # model omits `length`; 4000 bought 8% of a 50k blueprint per round.
+      CSAI_CHAT_MAX_TOKENS: ${CSAI_CHAT_MAX_TOKENS:-8192}
+      CSAI_MAX_CONTEXT_CHARS: ${CSAI_MAX_CONTEXT_CHARS:-40000}
+      CSAI_MAX_CHAT_K: ${CSAI_MAX_CHAT_K:-12}
+      CSAI_CHAT_DOC_TEXT_WINDOW: ${CSAI_CHAT_DOC_TEXT_WINDOW:-20000}
+      CSAI_CHAT_DOC_TEXT_MAX_WINDOW: ${CSAI_CHAT_DOC_TEXT_MAX_WINDOW:-20000}
+      CSAI_CHAT_DOC_SEARCH_LIMIT: ${CSAI_CHAT_DOC_SEARCH_LIMIT:-10}
       # Indexing reads ALL content (system_admin bypass) so the vector index is
       # complete; per-user ACLs are enforced at retrieval time. Leave on.
       CSAI_INDEX_BYPASS_ACL: ${CSAI_INDEX_BYPASS_ACL:-true}
