@@ -513,6 +513,21 @@ services:
     environment:
       <<: *csai-env
     command: ["convert-search-ai-worker"]
+    # The core REQUIRES callers to authenticate from 1.8.0 onward, so this mount
+    # is not optional for anything that talks to it. Every API-facing service
+    # already had it; none of the workers, consumers or reconcilers did, and each
+    # of them failed every RPC with "no service token presented" — nothing
+    # indexed, no comment event consumed, no folder action fired, no rendition
+    # built.
+    #
+    # It stayed hidden because a BLANK stack generates no work for these
+    # services: with no content there are no events, so they never call the core
+    # and never fail. It surfaced within seconds of a production backup being
+    # restored into the stack, which is the only configuration that exercises
+    # them. Worth remembering when adding the next background service — a green
+    # `compose up` does not mean these can reach the core.
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     restart: unless-stopped
 
   # ONLYOFFICE Document Server — renders the in-browser office editor (Phase 1.7).
@@ -679,6 +694,9 @@ services:
     environment:
       <<: *disc-env
     command: ["discuss-consumer"]
+    # Same as csai-worker: authentication to the core is mandatory since 1.8.0.
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     restart: unless-stopped
 
   # Discussion MCP door (Streamable-HTTP) — agents read/post comments under their
@@ -697,6 +715,9 @@ services:
     environment:
       <<: *disc-env
     command: ["discuss-mcp-http"]
+    # Same as csai-worker: authentication to the core is mandatory since 1.8.0.
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import socket,sys; socket.create_connection(('localhost',8095),3)\" || exit 1"]
       interval: 10s
@@ -722,6 +743,9 @@ services:
     environment:
       <<: *disc-env
     command: ["digest-cron"]
+    # Same as csai-worker: authentication to the core is mandatory since 1.8.0.
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     restart: unless-stopped
 
   # folder_actions — custom actions bound to a virtual folder (move on review
@@ -830,6 +854,9 @@ services:
     environment:
       <<: *fa-env
     command: ["folder-actions-consumer"]
+    # Same as csai-worker: authentication to the core is mandatory since 1.8.0.
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     restart: unless-stopped
 
   # folder_actions reconcile sweep — periodic catch-up for events missed during an
@@ -846,6 +873,9 @@ services:
     environment:
       <<: *fa-env
     command: ["folder-actions-reconcile"]
+    # Same as csai-worker: authentication to the core is mandatory since 1.8.0.
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     restart: unless-stopped
 
   # difference_service — version-to-version comparison. Builds "diff renditions"
@@ -931,6 +961,9 @@ services:
     environment:
       <<: *diff-env
     command: ["difference-consumer"]
+    # Same as csai-worker: authentication to the core is mandatory since 1.8.0.
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     restart: unless-stopped
 
   # Periodic backfill — catches versions whose events were missed during an outage
@@ -947,6 +980,9 @@ services:
     environment:
       <<: *diff-env
     command: ["difference-reconcile"]
+    # Same as csai-worker: authentication to the core is mandatory since 1.8.0.
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
     restart: unless-stopped
 
   # bcf_services — the openBIM (BCF) door: BCF-API for desktop BIM issue managers
