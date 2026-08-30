@@ -32,6 +32,7 @@ LDAP_BIND_DN="$(geten LDAP_BIND_DN)"
 LDAP_BIND_PASSWORD="$(geten LDAP_BIND_PASSWORD)"
 LDAP_ADMIN_EMAIL="$(geten LDAP_ADMIN_EMAIL)"
 LDAP_USER_BASE="$(geten LDAP_USER_BASE)"
+LDAP_TENANT_BASE="$(geten LDAP_TENANT_BASE)"
 dc() { docker compose --env-file "$ENV_FILE" "$@"; }
 
 echo "[restore] from $IN (stack must be up)"
@@ -83,6 +84,47 @@ if [ -f "$IN/directory.ldif" ]; then
     | dc exec -T ldap ldapmodify -x -c -H ldap://localhost:3389 \
         -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PASSWORD" 2>&1 \
     | grep -vE "Type or value exists|^modifying entry" || true
+
+  # Remove role groups the export does not have.
+  #
+  # The seed necessarily runs BEFORE any restore — the stack has to be up for
+  # ldap-init to create the suffix backend — so its own role groups exist by the
+  # time the export is replayed, whether or not the source deployment had them.
+  # On a real restore that left cn=users, cn=contributors and cn=system_admin
+  # behind, with the local admin in all three. system_admin is the global
+  # privilege bypass, so the copy came out MORE privileged than the system it was
+  # copied from. Refusing to re-seed stops that recurring; it does not undo the
+  # first seed, which is what this does.
+  #
+  # Scoped to groups under the tenant base and to nothing else: users are
+  # additive and are never removed, and the local admin keeps signing in
+  # regardless — it simply ends up holding exactly the roles the source admin
+  # held.
+  #
+  # Set RESTORE_PRUNE_GROUPS=0 to keep a restore purely additive, at the cost of
+  # a directory that does not match its source.
+  if [ "${RESTORE_PRUNE_GROUPS:-1}" = "1" ]; then
+    _norm() { tr 'A-Z' 'a-z' | sed 's/, */,/g'; }
+    _want="$(sed ':a;N;$!ba;s/\n //g' "$_ldif" | sed -n 's/^dn: //p' | _norm | sort -u)"
+    _have="$(dc exec -T ldap ldapsearch -x -H ldap://localhost:3389 \
+               -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PASSWORD" -b "$LDAP_TENANT_BASE" -LLL \
+               "(objectClass=groupOfNames)" dn 2>/dev/null \
+             | sed ':a;N;$!ba;s/\n //g' | sed -n 's/^dn: //p' | tr -d '\r')"
+
+    while IFS= read -r _dn; do
+      [ -n "$_dn" ] || continue
+      if ! printf '%s\n' "$_want" | grep -qxF "$(printf '%s' "$_dn" | _norm)"; then
+        echo "[restore] ldap: removing '$_dn' — not in the export (seeded, not restored)"
+        # </dev/null is load-bearing. `docker compose exec` reads stdin even with
+        # -T, so without it the delete swallows the rest of the here-string and
+        # the loop stops after the first entry — which looked like the prune
+        # working, having removed exactly one of the three groups.
+        dc exec -T ldap ldapdelete -x -H ldap://localhost:3389 \
+           -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PASSWORD" "$_dn" >/dev/null 2>&1 </dev/null \
+           || echo "  (could not remove it; check by hand)"
+      fi
+    done <<< "$_have"
+  fi
 
   # Prove the thing this is all for: exactly one entry answers to the
   # configured address. Two is the lockout, and it is much better found now,
