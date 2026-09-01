@@ -16,6 +16,14 @@ NAME="${BRAND_APP_NAME:-}"
 ICON="${BRAND_ICON_URL:-}"
 TITLE="${BRAND_TITLE:-}"
 
+# Sign-in background: an image, or a video the SPA loops. LOGIN_POSTER is the
+# still shown before a video paints and INSTEAD of it for anyone who has asked
+# for reduced motion; LOGIN_OVERLAY is the scrim that keeps the form readable
+# over whatever is behind it.
+LOGIN_BG="${BRAND_LOGIN_BACKGROUND_URL:-}"
+LOGIN_POSTER="${BRAND_LOGIN_POSTER_URL:-}"
+LOGIN_OVERLAY="${BRAND_LOGIN_OVERLAY:-}"
+
 LIGHT_KEYS=(fg muted border bg card primary primaryHover danger success)
 LIGHT_VALS=("$BRAND_LIGHT_FG" "$BRAND_LIGHT_MUTED" "$BRAND_LIGHT_BORDER" \
             "$BRAND_LIGHT_BG" "$BRAND_LIGHT_CARD" "$BRAND_LIGHT_PRIMARY" \
@@ -29,7 +37,7 @@ DARK_VALS=("$BRAND_DARK_FG" "$BRAND_DARK_MUTED" "$BRAND_DARK_BORDER" \
 #
 # Concatenated element by element, not "${arr[*]}": that joins on IFS, so nine
 # empty values produce eight spaces and the emptiness test never fires.
-ANY="$NAME$ICON$TITLE"
+ANY="$NAME$ICON$TITLE$LOGIN_BG$LOGIN_POSTER$LOGIN_OVERLAY"
 for _v in "${LIGHT_VALS[@]}" "${DARK_VALS[@]}"; do ANY="$ANY$_v"; done
 
 if [ -z "$ANY" ]; then
@@ -61,6 +69,8 @@ palette() {
   printf ',"title":"%s"' "$(esc "$TITLE")"
   printf ',"light":%s' "$(palette LIGHT_VALS)"
   printf ',"dark":%s' "$(palette DARK_VALS)"
+  printf ',"login":{"backgroundUrl":"%s","posterUrl":"%s","overlay":"%s"}' \
+    "$(esc "$LOGIN_BG")" "$(esc "$LOGIN_POSTER")" "$(esc "$LOGIN_OVERLAY")"
   printf '}\n'
 } > "$OUT"
 

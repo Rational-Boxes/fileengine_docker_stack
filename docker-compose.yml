@@ -1241,6 +1241,10 @@ services:
       BRAND_APP_NAME: ${BRAND_APP_NAME:-}
       BRAND_TITLE: ${BRAND_TITLE:-}
       BRAND_ICON_URL: ${BRAND_ICON_URL:-}
+      # Sign-in background: an image, or a video the SPA loops muted.
+      BRAND_LOGIN_BACKGROUND_URL: ${BRAND_LOGIN_BACKGROUND_URL:-}
+      BRAND_LOGIN_POSTER_URL: ${BRAND_LOGIN_POSTER_URL:-}
+      BRAND_LOGIN_OVERLAY: ${BRAND_LOGIN_OVERLAY:-}
       BRAND_LIGHT_FG: ${BRAND_LIGHT_FG:-}
       BRAND_LIGHT_MUTED: ${BRAND_LIGHT_MUTED:-}
       BRAND_LIGHT_BORDER: ${BRAND_LIGHT_BORDER:-}
@@ -1265,10 +1269,12 @@ services:
     volumes:
       - letsencrypt:/etc/letsencrypt
       - nginxtls:/etc/nginx/tls
-      # A logo, if BRAND_ICON_URL points at one. Same-origin only — the SPA
-      # refuses an off-site mark, so the file has to be served from here:
-      #   - ./branding/logo.svg:/usr/share/nginx/html/branding/logo.svg:ro
+      # Branding assets — the logo, and any sign-in background. Same-origin
+      # only: the SPA refuses off-site media, so the files are served from here.
+      #   - ./branding:/usr/share/nginx/html/branding:ro
       #   BRAND_ICON_URL=/branding/logo.svg
+      #   BRAND_LOGIN_BACKGROUND_URL=/branding/lobby.mp4
+      #   BRAND_LOGIN_POSTER_URL=/branding/lobby.jpg
     restart: unless-stopped
 
 volumes:
