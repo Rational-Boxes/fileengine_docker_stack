@@ -62,7 +62,9 @@ it with `make spa BASE_DOMAIN=… && docker compose build nginx && docker compos
 ### 2.1 White-labelling
 
 The name, the logo, and the interface colours are per-deployment, and none of
-them require a rebuild.
+them require a rebuild. This is the Compose-stack summary; the full guide,
+covering both deployment shapes and how to verify the result, is `BRANDING.md`
+in the scripts repo (`Ansible/docs/BRANDING.md`).
 
 The nginx entrypoint renders `/branding.json` from the `BRAND_*` variables and
 the SPA reads it at startup, so re-branding is `docker compose up -d nginx`. This
