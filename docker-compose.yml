@@ -410,6 +410,13 @@ services:
       CSAI_HTTP_HOST: 0.0.0.0
       CSAI_HTTP_PORT: "8092"
       CSAI_CORS_ORIGINS: ${CSAI_CORS_ORIGINS:-}
+      # Optional override for the app URL baked into saved reports' file
+      # deep-links. Unset is normal: the links go on the same FQDN the chat was
+      # served on, which nginx forwards (Host + X-Forwarded-Proto) — so every
+      # tenant's reports link to that tenant's own domain automatically. Set it
+      # only where Host is not the public FQDN, and then use the per-tenant form
+      # (https://{tenant}.example.com) unless one host serves all tenants.
+      CSAI_PUBLIC_APP_URL: ${CSAI_PUBLIC_APP_URL:-}
       # Accept the bridge's bearer token (introspected at /v1/auth/introspect) so
       # the SPA's single login also authenticates chat/search here. REQUIRED for
       # the frontend — without it the SPA reuses its bridge token and CSAI rejects
