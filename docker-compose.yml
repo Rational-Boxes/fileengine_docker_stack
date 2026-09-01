@@ -1235,12 +1235,46 @@ services:
       # nginx renders the vhost with Basic auth (admin / COCKPIT_ADMIN_PASSWORD).
       ENABLE_LDAP_ADMIN: ${ENABLE_LDAP_ADMIN:-0}
       COCKPIT_ADMIN_PASSWORD: ${COCKPIT_ADMIN_PASSWORD:-}
+      # White-label overrides, rendered to /branding.json at startup and read by
+      # the SPA. All optional; unset everywhere means stock FileEngine. Runtime
+      # and not build-time so one published image serves every customer.
+      BRAND_APP_NAME: ${BRAND_APP_NAME:-}
+      BRAND_TITLE: ${BRAND_TITLE:-}
+      BRAND_ICON_URL: ${BRAND_ICON_URL:-}
+      # Sign-in background: an image, or a video the SPA loops muted.
+      BRAND_LOGIN_BACKGROUND_URL: ${BRAND_LOGIN_BACKGROUND_URL:-}
+      BRAND_LOGIN_POSTER_URL: ${BRAND_LOGIN_POSTER_URL:-}
+      BRAND_LOGIN_OVERLAY: ${BRAND_LOGIN_OVERLAY:-}
+      BRAND_LIGHT_FG: ${BRAND_LIGHT_FG:-}
+      BRAND_LIGHT_MUTED: ${BRAND_LIGHT_MUTED:-}
+      BRAND_LIGHT_BORDER: ${BRAND_LIGHT_BORDER:-}
+      BRAND_LIGHT_BG: ${BRAND_LIGHT_BG:-}
+      BRAND_LIGHT_CARD: ${BRAND_LIGHT_CARD:-}
+      BRAND_LIGHT_PRIMARY: ${BRAND_LIGHT_PRIMARY:-}
+      BRAND_LIGHT_PRIMARY_HOVER: ${BRAND_LIGHT_PRIMARY_HOVER:-}
+      BRAND_LIGHT_DANGER: ${BRAND_LIGHT_DANGER:-}
+      BRAND_LIGHT_SUCCESS: ${BRAND_LIGHT_SUCCESS:-}
+      BRAND_DARK_FG: ${BRAND_DARK_FG:-}
+      BRAND_DARK_MUTED: ${BRAND_DARK_MUTED:-}
+      BRAND_DARK_BORDER: ${BRAND_DARK_BORDER:-}
+      BRAND_DARK_BG: ${BRAND_DARK_BG:-}
+      BRAND_DARK_CARD: ${BRAND_DARK_CARD:-}
+      BRAND_DARK_PRIMARY: ${BRAND_DARK_PRIMARY:-}
+      BRAND_DARK_PRIMARY_HOVER: ${BRAND_DARK_PRIMARY_HOVER:-}
+      BRAND_DARK_DANGER: ${BRAND_DARK_DANGER:-}
+      BRAND_DARK_SUCCESS: ${BRAND_DARK_SUCCESS:-}
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - letsencrypt:/etc/letsencrypt
       - nginxtls:/etc/nginx/tls
+      # Branding assets — the logo, and any sign-in background. Same-origin
+      # only: the SPA refuses off-site media, so the files are served from here.
+      #   - ./branding:/usr/share/nginx/html/branding:ro
+      #   BRAND_ICON_URL=/branding/logo.svg
+      #   BRAND_LOGIN_BACKGROUND_URL=/branding/lobby.mp4
+      #   BRAND_LOGIN_POSTER_URL=/branding/lobby.jpg
     restart: unless-stopped
 
 volumes:

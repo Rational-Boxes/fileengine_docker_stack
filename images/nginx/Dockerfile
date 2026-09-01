@@ -17,9 +17,10 @@ COPY snippets/ /etc/nginx/snippets/
 COPY conf.d/ /etc/nginx/conf.d/
 # Startup + TLS scripts.
 COPY entrypoint.sh /entrypoint.sh
-COPY render-config.sh tls-setup.sh obtain-cert.sh /usr/local/bin/
+COPY render-config.sh tls-setup.sh obtain-cert.sh branding-setup.sh /usr/local/bin/
 RUN chmod +x /entrypoint.sh /usr/local/bin/render-config.sh \
         /usr/local/bin/tls-setup.sh /usr/local/bin/obtain-cert.sh \
+        /usr/local/bin/branding-setup.sh \
     && rm -f /etc/nginx/conf.d/default.conf
 
 EXPOSE 80 443

@@ -52,10 +52,55 @@ All config is in `.env` (no secrets are auto-generated). Key groups — see
   `LDAP_ADMIN_EMAIL/PASSWORD`, `DEFAULT_TENANT`.
 - **AI:** `CSAI_EMBEDDING_*` (independent of) `CSAI_CHAT_*`; `INSTALL_DOCLING`.
 - **MCP policy:** `MCP_READ_ONLY`, `MCP_ALLOW_DELETE`.
+- **White-labelling:** `BRAND_APP_NAME`, `BRAND_TITLE`, `BRAND_ICON_URL`,
+  `BRAND_{LIGHT,DARK}_*` — section 2.1.
 
 After editing `.env`, apply with `docker compose up -d` (recreates the services
 whose env changed). The SPA's `BASE_DOMAIN` is **baked at build time** — change
 it with `make spa BASE_DOMAIN=… && docker compose build nginx && docker compose up -d nginx`.
+
+### 2.1 White-labelling
+
+The name, the logo, and the interface colours are per-deployment, and none of
+them require a rebuild. This is the Compose-stack summary; the full guide,
+covering both deployment shapes and how to verify the result, is `BRANDING.md`
+in the scripts repo (`Ansible/docs/BRANDING.md`).
+
+The nginx entrypoint renders `/branding.json` from the `BRAND_*` variables and
+the SPA reads it at startup, so re-branding is `docker compose up -d nginx`. This
+is deliberately *runtime* rather than build-time: the SPA image is published once
+and deployed everywhere, and baking a customer's name into it would mean a
+separate image per customer — which is the thing white-labelling exists to avoid.
+`BASE_DOMAIN`, by contrast, still is baked, and still needs the rebuild above.
+
+| | |
+|---|---|
+| `BRAND_APP_NAME` | Left of the main navigation, and above the sign-in form |
+| `BRAND_TITLE` | Browser tab; follows `BRAND_APP_NAME` when unset |
+| `BRAND_ICON_URL` | Logo beside the name. **Same-origin path only** |
+| `BRAND_LIGHT_*` / `BRAND_DARK_*` | Interface colours, per theme, independently |
+| `BRAND_LOGIN_BACKGROUND_URL` | Sign-in background — an image, or a video to loop |
+| `BRAND_LOGIN_POSTER_URL` | Still for the video; also what reduced-motion visitors get |
+| `BRAND_LOGIN_OVERLAY` | Optional scrim over the media; none by default |
+
+Both themes are configured separately and either can be left alone — a
+deployment that sets only `BRAND_DARK_PRIMARY` keeps the stock light palette. The
+colour a deployment usually wants is `*_PRIMARY` (and `*_PRIMARY_HOVER`), the
+accent on buttons, links, and selection; `FG`, `MUTED`, `BORDER`, `BG`, `CARD`,
+`DANGER`, and `SUCCESS` are there when the accent alone is not enough.
+
+**The logo must be served from the deployment's own origin.** An off-site URL is
+dropped rather than fetched — a logo on somebody else's CDN is a third-party
+request on every page load, which is not something a white-label customer is
+likely to want. Bind-mount the file into nginx (there is a commented example on
+the `nginx` service in `docker-compose.yml`) and point `BRAND_ICON_URL` at the
+path it lands on. A `data:` URI works too, for a small mark.
+
+Colour values are validated before they reach the stylesheet, so a malformed one
+is ignored and the stock colour shows through; the branded name and colours
+appear a moment after first paint, since the file is fetched rather than baked.
+Setting nothing anywhere serves stock FileEngine, and unsetting the variables
+again removes the file rather than leaving the last brand in place.
 
 ---
 
