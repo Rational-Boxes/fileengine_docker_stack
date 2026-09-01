@@ -4,5 +4,6 @@
 set -e
 /usr/local/bin/tls-setup.sh
 /usr/local/bin/render-config.sh
+/usr/local/bin/branding-setup.sh
 nginx -t
 exec nginx -g 'daemon off;'

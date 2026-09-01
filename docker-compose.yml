@@ -1235,12 +1235,40 @@ services:
       # nginx renders the vhost with Basic auth (admin / COCKPIT_ADMIN_PASSWORD).
       ENABLE_LDAP_ADMIN: ${ENABLE_LDAP_ADMIN:-0}
       COCKPIT_ADMIN_PASSWORD: ${COCKPIT_ADMIN_PASSWORD:-}
+      # White-label overrides, rendered to /branding.json at startup and read by
+      # the SPA. All optional; unset everywhere means stock FileEngine. Runtime
+      # and not build-time so one published image serves every customer.
+      BRAND_APP_NAME: ${BRAND_APP_NAME:-}
+      BRAND_TITLE: ${BRAND_TITLE:-}
+      BRAND_ICON_URL: ${BRAND_ICON_URL:-}
+      BRAND_LIGHT_FG: ${BRAND_LIGHT_FG:-}
+      BRAND_LIGHT_MUTED: ${BRAND_LIGHT_MUTED:-}
+      BRAND_LIGHT_BORDER: ${BRAND_LIGHT_BORDER:-}
+      BRAND_LIGHT_BG: ${BRAND_LIGHT_BG:-}
+      BRAND_LIGHT_CARD: ${BRAND_LIGHT_CARD:-}
+      BRAND_LIGHT_PRIMARY: ${BRAND_LIGHT_PRIMARY:-}
+      BRAND_LIGHT_PRIMARY_HOVER: ${BRAND_LIGHT_PRIMARY_HOVER:-}
+      BRAND_LIGHT_DANGER: ${BRAND_LIGHT_DANGER:-}
+      BRAND_LIGHT_SUCCESS: ${BRAND_LIGHT_SUCCESS:-}
+      BRAND_DARK_FG: ${BRAND_DARK_FG:-}
+      BRAND_DARK_MUTED: ${BRAND_DARK_MUTED:-}
+      BRAND_DARK_BORDER: ${BRAND_DARK_BORDER:-}
+      BRAND_DARK_BG: ${BRAND_DARK_BG:-}
+      BRAND_DARK_CARD: ${BRAND_DARK_CARD:-}
+      BRAND_DARK_PRIMARY: ${BRAND_DARK_PRIMARY:-}
+      BRAND_DARK_PRIMARY_HOVER: ${BRAND_DARK_PRIMARY_HOVER:-}
+      BRAND_DARK_DANGER: ${BRAND_DARK_DANGER:-}
+      BRAND_DARK_SUCCESS: ${BRAND_DARK_SUCCESS:-}
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - letsencrypt:/etc/letsencrypt
       - nginxtls:/etc/nginx/tls
+      # A logo, if BRAND_ICON_URL points at one. Same-origin only — the SPA
+      # refuses an off-site mark, so the file has to be served from here:
+      #   - ./branding/logo.svg:/usr/share/nginx/html/branding/logo.svg:ro
+      #   BRAND_ICON_URL=/branding/logo.svg
     restart: unless-stopped
 
 volumes:
