@@ -81,7 +81,7 @@ separate image per customer — which is the thing white-labelling exists to avo
 | `BRAND_LIGHT_*` / `BRAND_DARK_*` | Interface colours, per theme, independently |
 | `BRAND_LOGIN_BACKGROUND_URL` | Sign-in background — an image, or a video to loop |
 | `BRAND_LOGIN_POSTER_URL` | Still for the video; also what reduced-motion visitors get |
-| `BRAND_LOGIN_OVERLAY` | Scrim over the media, so the form stays readable |
+| `BRAND_LOGIN_OVERLAY` | Optional scrim over the media; none by default |
 
 Both themes are configured separately and either can be left alone — a
 deployment that sets only `BRAND_DARK_PRIMARY` keeps the stock light palette. The
