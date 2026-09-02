@@ -471,6 +471,14 @@ services:
       FILEENGINE_REDIS_HOST: redis
       FILEENGINE_REDIS_PORT: "6379"
       FILEENGINE_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # Honour the bridge's revoked-token denylist. This service verifies bridge
+      # JWTs LOCALLY against the shared secret, so a signature and an exp were
+      # the whole test — a signed-out token kept working here after the bridge
+      # had begun refusing it. It now reads auth:revoked:{jti} from the Redis
+      # above. Fail-closed, and the cache TTL is the revocation latency.
+      AUTH_REVOCATION_ENABLED: ${AUTH_REVOCATION_ENABLED:-true}
+      AUTH_REVOCATION_CACHE_TTL_SECONDS: ${AUTH_REVOCATION_CACHE_TTL_SECONDS:-5}
+      AUTH_REVOCATION_FAIL_OPEN: ${AUTH_REVOCATION_FAIL_OPEN:-false}
       FILEENGINE_EVENTS_STREAM: ${EVENTS_STREAM:-fileengine:events}
       # AI providers (independent): embeddings on bundled CPU Ollama, chat external.
       CSAI_EMBEDDING_PROVIDER: ${CSAI_EMBEDDING_PROVIDER:-ollama}
@@ -681,6 +689,14 @@ services:
       FILEENGINE_REDIS_HOST: redis
       FILEENGINE_REDIS_PORT: "6379"
       FILEENGINE_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # Honour the bridge's revoked-token denylist. This service verifies bridge
+      # JWTs LOCALLY against the shared secret, so a signature and an exp were
+      # the whole test — a signed-out token kept working here after the bridge
+      # had begun refusing it. It now reads auth:revoked:{jti} from the Redis
+      # above. Fail-closed, and the cache TTL is the revocation latency.
+      AUTH_REVOCATION_ENABLED: ${AUTH_REVOCATION_ENABLED:-true}
+      AUTH_REVOCATION_CACHE_TTL_SECONDS: ${AUTH_REVOCATION_CACHE_TTL_SECONDS:-5}
+      AUTH_REVOCATION_FAIL_OPEN: ${AUTH_REVOCATION_FAIL_OPEN:-false}
       FILEENGINE_EVENTS_STREAM: ${EVENTS_STREAM:-fileengine:events}
       # Comment vector index — shares the bundled CPU Ollama with CSAI (dimension
       # matches nomic-embed-text; it fixes the pgvector column, so keep it aligned).
@@ -835,6 +851,14 @@ services:
       FILEENGINE_REDIS_HOST: redis
       FILEENGINE_REDIS_PORT: "6379"
       FILEENGINE_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # Honour the bridge's revoked-token denylist. This service verifies bridge
+      # JWTs LOCALLY against the shared secret, so a signature and an exp were
+      # the whole test — a signed-out token kept working here after the bridge
+      # had begun refusing it. It now reads auth:revoked:{jti} from the Redis
+      # above. Fail-closed, and the cache TTL is the revocation latency.
+      AUTH_REVOCATION_ENABLED: ${AUTH_REVOCATION_ENABLED:-true}
+      AUTH_REVOCATION_CACHE_TTL_SECONDS: ${AUTH_REVOCATION_CACHE_TTL_SECONDS:-5}
+      AUTH_REVOCATION_FAIL_OPEN: ${AUTH_REVOCATION_FAIL_OPEN:-false}
       FILEENGINE_EVENTS_STREAM: ${EVENTS_STREAM:-fileengine:events}
       FA_EVENTS_GROUP: ${FA_EVENTS_GROUP:-folder_actions}
       # Reconcile sweep (§8) — recovers work missed during a Redis outage or past
@@ -962,6 +986,14 @@ services:
       FILEENGINE_REDIS_HOST: redis
       FILEENGINE_REDIS_PORT: "6379"
       FILEENGINE_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # Honour the bridge's revoked-token denylist. This service verifies bridge
+      # JWTs LOCALLY against the shared secret, so a signature and an exp were
+      # the whole test — a signed-out token kept working here after the bridge
+      # had begun refusing it. It now reads auth:revoked:{jti} from the Redis
+      # above. Fail-closed, and the cache TTL is the revocation latency.
+      AUTH_REVOCATION_ENABLED: ${AUTH_REVOCATION_ENABLED:-true}
+      AUTH_REVOCATION_CACHE_TTL_SECONDS: ${AUTH_REVOCATION_CACHE_TTL_SECONDS:-5}
+      AUTH_REVOCATION_FAIL_OPEN: ${AUTH_REVOCATION_FAIL_OPEN:-false}
       # Comparison is CPU-bound and can be slow on large drawings/models; these
       # are the two knobs worth tuning per host.
       DIFF_WORKER_CONCURRENCY: ${DIFF_WORKER_CONCURRENCY:-2}
@@ -1143,6 +1175,14 @@ services:
       FILEENGINE_REDIS_HOST: redis
       FILEENGINE_REDIS_PORT: "6379"
       FILEENGINE_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      # Honour the bridge's revoked-token denylist. This service verifies bridge
+      # JWTs LOCALLY against the shared secret, so a signature and an exp were
+      # the whole test — a signed-out token kept working here after the bridge
+      # had begun refusing it. It now reads auth:revoked:{jti} from the Redis
+      # above. Fail-closed, and the cache TTL is the revocation latency.
+      AUTH_REVOCATION_ENABLED: ${AUTH_REVOCATION_ENABLED:-true}
+      AUTH_REVOCATION_CACHE_TTL_SECONDS: ${AUTH_REVOCATION_CACHE_TTL_SECONDS:-5}
+      AUTH_REVOCATION_FAIL_OPEN: ${AUTH_REVOCATION_FAIL_OPEN:-false}
       FILEENGINE_AUDIT_STREAM: ${FILEENGINE_AUDIT_STREAM:-fileengine:audit}
       # Creator notifications ride the stream discussion's consumer already
       # reads, so no new transport.
@@ -1209,6 +1249,22 @@ services:
       # FILEENGINE_JWT_SECRET. Also forwarded to the bridge to provision home folders.
       FILEENGINE_JWT_SECRET: ${FILEENGINE_JWT_SECRET:?set FILEENGINE_JWT_SECRET (see .env.example)}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/3
+      # The revoked-token denylist is SEPARATE from REDIS_URL above, and has to
+      # be: that one is this service's own namespace (db 3), while the denylist
+      # is the bridge's, written to db 0. Pointing the check at db 3 would find
+      # nothing and quietly honour every revoked token — the failure would look
+      # exactly like the feature working.
+      #
+      # These are also load-bearing for availability: the check is fail-closed,
+      # so without them the client falls back to localhost:6379, cannot reach it
+      # from inside the container, and every authenticated request is refused.
+      FILEENGINE_REDIS_HOST: redis
+      FILEENGINE_REDIS_PORT: "6379"
+      FILEENGINE_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      FILEENGINE_REDIS_DB: "0"
+      AUTH_REVOCATION_ENABLED: ${AUTH_REVOCATION_ENABLED:-true}
+      AUTH_REVOCATION_CACHE_TTL_SECONDS: ${AUTH_REVOCATION_CACHE_TTL_SECONDS:-5}
+      AUTH_REVOCATION_FAIL_OPEN: ${AUTH_REVOCATION_FAIL_OPEN:-false}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${CSAI_DB}
       # The share-link OTP seam. share_service asks this service to issue and
       # check a recipient's one-time code, because the token store lives here:
