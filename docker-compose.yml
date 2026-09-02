@@ -266,6 +266,32 @@ services:
       TOKEN_TTL_SECONDS: ${TOKEN_TTL_SECONDS:-900}
       DOWNLOAD_TICKET_TTL_SECONDS: ${DOWNLOAD_TICKET_TTL_SECONDS:-30}
 
+      # --- sign-out actually ending the session --------------------------
+      # A stateless JWT is honoured until its exp no matter what happens in
+      # between, so DELETE /v1/auth/token used to end nothing: the token kept
+      # working in every copy of it — another tab, a script — for the rest of
+      # TOKEN_TTL_SECONDS, while the 204 said the session was over. The bridge
+      # now writes the revoked `jti` to the SHARED Redis (key auth:revoked:{jti},
+      # expiring with the token) and refuses it everywhere.
+      #
+      # Redis is shared on purpose: an in-process set would revoke the token on
+      # whichever instance served the logout and nowhere else, which is worse
+      # than not revoking, because it still looks like it worked.
+      #
+      # ON by default, and the bridge REFUSES TO START if it cannot reach the
+      # denylist — the same gate auditing has, for the same reason. Note this
+      # makes Redis load-bearing for authenticated requests, not just sign-ins.
+      AUTH_REVOCATION_ENABLED: ${AUTH_REVOCATION_ENABLED:-true}
+      # Seconds a verdict is cached per process. This IS the revocation latency
+      # (a signed-out token keeps working for at most this long on an instance
+      # that did not serve the logout) and it is what keeps a per-request check
+      # off a single Redis connection. 0 asks Redis every time.
+      AUTH_REVOCATION_CACHE_TTL_SECONDS: ${AUTH_REVOCATION_CACHE_TTL_SECONDS:-5}
+      # Honour a token whose status cannot be established. Trades the sign-out
+      # guarantee for availability during a Redis outage; off unless chosen,
+      # because failing open here silently restores the original bug.
+      AUTH_REVOCATION_FAIL_OPEN: ${AUTH_REVOCATION_FAIL_OPEN:-false}
+
       # --- the shared sign-in origin ------------------------------------
       # A reserved DNS label that never resolves to a tenant. Every tenant
       # subdomain sends a signed-out visitor to <LOGIN_SUBDOMAIN>.<base>, which
