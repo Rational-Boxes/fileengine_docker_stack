@@ -1195,9 +1195,16 @@ services:
       SHARE_DEFAULT_TENANT: ${DEFAULT_TENANT:-default}
       # The origin the /s/ landing page is served from. It goes into the URL a
       # creator copies and emails, so a wrong value is discovered by the
-      # RECIPIENT. Empty falls back to the request's own origin, which is right
-      # behind this nginx and wrong anywhere else.
+      # RECIPIENT. May carry a {tenant} placeholder, substituted with the tenant
+      # the link is minted in; without one it is a single fixed origin for every
+      # tenant. Empty falls back to SHARE_TENANT_BASE_DOMAIN below.
       SHARE_PUBLIC_BASE_URL: ${SHARE_PUBLIC_BASE_URL:-}
+      # Tenant origins are <tenant>.${BASE_DOMAIN} here, so the service can
+      # compose the right one. It cannot infer it from the request: the SPA
+      # switches tenant by sending X-Tenant and does NOT navigate, so the Host
+      # on a create is the origin the SPA was loaded from — routinely the
+      # default tenant's — while the link belongs to the active one.
+      SHARE_TENANT_BASE_DOMAIN: ${SHARE_TENANT_BASE_DOMAIN:-${BASE_DOMAIN}}
       SHARE_RETENTION_DAYS: ${SHARE_RETENTION_DAYS:-365}
       SHARE_RETENTION_TENANTS: ${SHARE_RETENTION_TENANTS:-}
     volumes:
