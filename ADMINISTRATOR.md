@@ -51,7 +51,7 @@ All config is in `.env` (no secrets are auto-generated). Key groups — see
 - **LDAP:** `LDAP_DOMAIN` (suffix), `LDAP_BIND_DN/PASSWORD`, `LDAP_*_BASE`,
   `LDAP_ADMIN_EMAIL/PASSWORD`, `DEFAULT_TENANT`.
 - **AI:** `CSAI_EMBEDDING_*` (independent of) `CSAI_CHAT_*`; `INSTALL_DOCLING`.
-- **MCP policy:** `MCP_READ_ONLY`, `MCP_ALLOW_DELETE`.
+- **MCP policy:** `MCP_READ_ONLY` (delete is not a policy — see section 7).
 - **White-labelling:** `BRAND_APP_NAME`, `BRAND_TITLE`, `BRAND_ICON_URL`,
   `BRAND_{LIGHT,DARK}_*` — section 2.1.
 
@@ -213,10 +213,18 @@ and `docker compose up -d csai-app csai-worker`.
 The MCP server (`/mcp`) authenticates each request against LDAP and resolves the
 tenant from the Host subdomain. Constrain what agents can do via `.env`:
 
-- `MCP_ALLOW_DELETE=0` (default) — soft-delete/undelete tools hidden.
 - `MCP_READ_ONLY=1` — hide all write tools.
 - `MCP_MAX_READ_BYTES` / `MCP_MAX_WRITE_BYTES` / `MCP_MAX_RESULTS` — per-call caps.
 - `MCP_SUBTREE_ALLOWLIST` — sandbox an agent to specific subtree UIDs.
+
+**Agents cannot delete, and this is not a setting.** There is no delete tool on
+the MCP surface — no soft delete, no undelete, no with-deleted listing, no hard
+delete, no version culling — and no environment variable that adds one. The
+credential this service presents to the core is issued `read write restore`, so
+every removal RPC is refused before it reaches a handler. `MCP_ALLOW_DELETE`
+existed in earlier releases and is now ignored; an `.env` that still sets it
+needs no change, but it does nothing. Removal stays with the people who can be
+held to it — the web UI and the REST API, which authenticate a human.
 
 Apply with `docker compose up -d mcp`.
 

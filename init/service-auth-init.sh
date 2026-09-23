@@ -34,11 +34,16 @@ fi
 #                granted `destroy`. Its purge endpoint will refuse. §5.4.9 keeps
 #                erasure on the admin surface; this makes that a property of the
 #                core rather than a convention.
-#   mcp          exposes a delete tool (server.py:463) and show_deleted listing,
-#                but is granted neither `delete` nor `destroy` per §6.3. "Append
+#   mcp          is granted neither `delete` nor `destroy` per §6.3. "Append
 #                only, recoverable" stops being something the MCP service chooses
 #                and becomes something the core enforces — a prompt-injected
-#                agent cannot delete however convincingly it is told to.
+#                agent cannot delete however convincingly it is told to. The
+#                door's tool surface is cut to the same set: it used to expose a
+#                delete tool and a show_deleted listing that this matrix could
+#                only ever refuse. It DOES hold `restore`: RestoreToVersion
+#                inserts a new version row pointing at the older payload and
+#                removes nothing, so it is a write — and it is the agent's only
+#                way back from a bad one.
 #
 # Both are behaviour changes, not oversights. Revisit them here, deliberately, if
 # the endpoints are wanted back.
@@ -46,7 +51,7 @@ declare -A CAPS=(
     [http_bridge]="read write delete restore acl roles admin"
     [webdav_bridge]="read write delete restore"
     [csai]="read write delete"
-    [mcp]="read write"
+    [mcp]="read write restore"
     [discussion]="read write"
     [folder_actions]="read write acl"
     [difference]="read write delete"
@@ -67,46 +72,56 @@ for service in "${!CAPS[@]}"; do
     if [ -s "$token_file" ] && fileengine_cli service-token list 2>/dev/null \
             | awk '{print $1}' | grep -qx "$service"; then
         skipped=$((skipped + 1))
-        continue
-    fi
+    else
+        # stdout is the secret and nothing else — the CLI silences the logger for
+        # exactly this. Write via a temporary file so a service never reads a
+        # half-written token.
+        # issue or rotate, and the difference matters. `issue` REFUSES to replace a
+        # credential in place — deliberately, because replacing would strand every
+        # running instance still presenting the old secret. So if the core already
+        # knows this service but the volume has no token for it (a wiped volume, an
+        # interrupted first run), issuing fails forever and the stack never starts.
+        #
+        # `rotate` adds a secret ALONGSIDE the existing one. Both stay valid, so
+        # anything still holding the old token keeps working until it restarts onto
+        # the new one. Retire the old with `service-token prune <service>` once
+        # everything has rolled over.
+        verb=issue
+        if fileengine_cli service-token list 2>/dev/null | awk '{print $1}' | grep -qx "$service"; then
+            verb=rotate
+            echo "  $service: credential exists but no token file — rotating"
+        fi
 
-    # stdout is the secret and nothing else — the CLI silences the logger for
-    # exactly this. Write via a temporary file so a service never reads a
-    # half-written token.
-    # issue or rotate, and the difference matters. `issue` REFUSES to replace a
-    # credential in place — deliberately, because replacing would strand every
-    # running instance still presenting the old secret. So if the core already
-    # knows this service but the volume has no token for it (a wiped volume, an
-    # interrupted first run), issuing fails forever and the stack never starts.
-    #
-    # `rotate` adds a secret ALONGSIDE the existing one. Both stay valid, so
-    # anything still holding the old token keeps working until it restarts onto
-    # the new one. Retire the old with `service-token prune <service>` once
-    # everything has rolled over.
-    verb=issue
-    if fileengine_cli service-token list 2>/dev/null | awk '{print $1}' | grep -qx "$service"; then
-        verb=rotate
-        echo "  $service: credential exists but no token file — rotating"
-    fi
-
-    tmp="$token_file.tmp"
-    # Clear a temp left by a run that died between write and move.
-    rm -f "$tmp"
-    if ! fileengine_cli service-token "$verb" "$service" > "$tmp"; then
-        echo "could not issue a credential for $service" >&2
+        tmp="$token_file.tmp"
+        # Clear a temp left by a run that died between write and move.
         rm -f "$tmp"
-        exit 1
+        if ! fileengine_cli service-token "$verb" "$service" > "$tmp"; then
+            echo "could not issue a credential for $service" >&2
+            rm -f "$tmp"
+            exit 1
+        fi
+        # 0444, not 0400. Ten images run as ten different unprivileged users, and a
+        # mode only this container's uid can read is a mode no service can use. The
+        # containment here is the volume: it is internal to this stack, never
+        # published, and mounted read-only by exactly the services that need it. A
+        # tighter mode would need a uid shared across every image, which is a larger
+        # change than it sounds and buys nothing against anyone who can already
+        # enter one of these containers.
+        chmod 0444 "$tmp"
+        mv "$tmp" "$token_file"
+        issued=$((issued + 1))
     fi
-    # 0444, not 0400. Ten images run as ten different unprivileged users, and a
-    # mode only this container's uid can read is a mode no service can use. The
-    # containment here is the volume: it is internal to this stack, never
-    # published, and mounted read-only by exactly the services that need it. A
-    # tighter mode would need a uid shared across every image, which is a larger
-    # change than it sounds and buys nothing against anyone who can already
-    # enter one of these containers.
-    chmod 0444 "$tmp"
-    mv "$tmp" "$token_file"
 
+    # Capabilities are reconciled on EVERY run, not only when a credential is
+    # first issued. `service grant` is idempotent; issuance is not, so granting
+    # only in the branch above meant a change to the matrix at the top of this
+    # file never reached a stack that had already started once. The service kept
+    # whatever it was born with and failed the new calls with PERMISSION_DENIED,
+    # several layers away from the edit that caused it.
+    #
+    # This adds; it does not take away. A capability dropped from the matrix must
+    # be revoked deliberately (`fileengine_cli service revoke-cap`), because an
+    # operator may have armed this deployment by hand.
     for cap in ${CAPS[$service]}; do
         # `accountability` and `destroy` refuse to be granted without this flag,
         # so that arming a service stays a separate act from onboarding it. Only
@@ -121,7 +136,6 @@ for service in "${!CAPS[@]}"; do
         # up much later as PERMISSION_DENIED with nothing pointing back here.
         fileengine_cli service grant "$service" "$cap" $flag
     done
-    issued=$((issued + 1))
 done
 
 echo "service auth: issued $issued, already present $skipped"

@@ -516,7 +516,7 @@ operation that heals itself on reconnect.
 - [ ] All `*_PASSWORD`, `*_API_KEY`, and `AT_REST_KEY` are strong and unique.
 - [ ] `AT_REST_KEY` and `.env` are backed up to a secrets manager.
 - [ ] `FILEENGINE_ENCRYPT_DATA=true` (at-rest encryption on).
-- [ ] `MCP_READ_ONLY` / `MCP_ALLOW_DELETE` set to your agent policy.
+- [ ] `MCP_READ_ONLY` set to your agent policy (delete is never exposed).
 - [ ] Elastic/static IP so wildcard DNS stays valid across restarts.
 - [ ] Postgres/Redis/LDAP are **not** published on host ports (compose keeps them internal).
 - [ ] The `filecache` volume is on a **dedicated disk**, not the root volume (see §7).

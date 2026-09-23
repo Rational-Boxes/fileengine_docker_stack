@@ -624,7 +624,10 @@ services:
       FILEENGINE_LDAP_TENANT_BASE: ${LDAP_TENANT_BASE}
       FILEENGINE_LDAP_USER_BASE: ${LDAP_USER_BASE}
       MCP_READ_ONLY: ${MCP_READ_ONLY:-0}
-      MCP_ALLOW_DELETE: ${MCP_ALLOW_DELETE:-0}
+      # No MCP_ALLOW_DELETE. The mcp service credential holds `read write restore`
+      # and nothing that removes, so the core refuses every delete RPC to this
+      # door; the tool surface is cut to match and there is no setting that adds
+      # one back. See ADMINISTRATOR.md section 7.
     volumes:
       - servicetokens:/run/fileengine/tokens:ro
     healthcheck:
