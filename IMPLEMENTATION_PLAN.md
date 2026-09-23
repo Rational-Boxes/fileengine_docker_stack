@@ -334,7 +334,7 @@ All configuration is **operator-provided** (no auto-generation of secrets).
 | `CSAI_EMBEDDING_PROVIDER/_MODEL/_BASE_URL/_API_KEY/_DIMENSION` | csai | embeddings (external/offline) |
 | `CSAI_CHAT_PROVIDER/_MODEL/_BASE_URL/_API_KEY` | csai | chat/RAG (external/offline) |
 | `MCP_AGENT_EMAIL`, `MCP_AGENT_PASSWORD` | mcp | LDAP agent identity for the stdio fallback / service bind (per-request callers auth with their own creds) |
-| `MCP_READ_ONLY`, `MCP_ALLOW_DELETE` | mcp | tool-exposure policy (default: writes on, delete **off**) |
+| `MCP_READ_ONLY` | mcp | tool-exposure policy (writes on; delete is not exposed at all) |
 | `MCP_MAX_READ_BYTES`, `MCP_MAX_WRITE_BYTES`, `MCP_MAX_RESULTS` | mcp | per-call guardrails |
 | `MCP_SUBTREE_ALLOWLIST`, `MCP_TOKEN_TTL` | mcp | optional subtree sandbox; bearer-token lifetime |
 
@@ -561,7 +561,7 @@ docker_unified/
 6. **MCP** — `fileengine-mcp` image (HTTP transport, build ctx incl.
    `python_interface`); wire to core gRPC + LDAP; route `<tenant>.<base>/mcp` via
    nginx; verify per-request auth (Basic/Bearer) and tenant-from-subdomain, and
-   the tool-exposure policy (`MCP_READ_ONLY`/`MCP_ALLOW_DELETE`). ✅
+   the tool-exposure policy (`MCP_READ_ONLY`; delete is not exposed). ✅
    *Done:* `images/mcp/` (staged via `make stage-mcp`) wired to core + LDAP;
    **verified `GET /mcp/whoami` through nginx** returned the identity with
    `tenant=default` resolved from the Host subdomain.

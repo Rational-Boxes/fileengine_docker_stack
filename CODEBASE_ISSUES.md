@@ -206,9 +206,11 @@ subdomain was deliberately not used (MCP takes the whole first label, so it woul
 mis-resolve `someco-mcp`; the path avoids it). Optional polish: honor
 `X-Forwarded-Prefix` so the helper paths are prefix-clean.
 
-### MCP-3 🟦 — Tool-exposure policy defaults for the deployment
-Confirm the deployment sets a sensible policy via `MCP_*`: writes on,
-**delete off** (`MCP_ALLOW_DELETE=0`, the default), per-call size caps
+### MCP-3 ✅ — Tool-exposure policy defaults for the deployment
+Delete is no longer a deployment choice: `MCP_ALLOW_DELETE` is gone and the MCP
+surface exposes nothing that removes anything, because the service credential
+(`read write restore`) means the core would refuse it anyway. What remains to
+confirm per deployment: per-call size caps
 (`MCP_MAX_READ_BYTES`/`MCP_MAX_WRITE_BYTES`/`MCP_MAX_RESULTS`), and optionally
 `MCP_READ_ONLY=1` or an `MCP_SUBTREE_ALLOWLIST` sandbox for untrusted agents.
 
