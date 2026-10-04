@@ -435,6 +435,11 @@ services:
     environment: &csai-env
       CSAI_HTTP_HOST: 0.0.0.0
       CSAI_HTTP_PORT: "8092"
+      # Media publishing (MEDIA_SHARE.md §4): share_service asks for publishes
+      # and is asked whether a published copy is still played. Same secret both
+      # ways; an unset one disables CSAI's internal routes (fail-safe: copies kept).
+      CSAI_INTERNAL_SECRET: ${MEDIA_INTERNAL_SECRET:-}
+      CSAI_MEDIA_REFS_URL: http://share:8101/share/v1/internal/media-refs
       CSAI_CORS_ORIGINS: ${CSAI_CORS_ORIGINS:-}
       # Optional override for the app URL baked into saved reports' file
       # deep-links. Unset is normal: the links go on the same FQDN the chat was
@@ -567,6 +572,25 @@ services:
     # restored into the stack, which is the only configuration that exercises
     # them. Worth remembering when adding the next background service — a green
     # `compose up` does not mean these can reach the core.
+    volumes:
+      - servicetokens:/run/fileengine/tokens:ro
+    restart: unless-stopped
+
+  # Media publishing worker (MEDIA_SHARE.md §4.4): encodes 720p/480p/GIF ON
+  # PUBLISH REQUEST only, polling the durable media_jobs table, so an idle one
+  # costs nothing. Same image and identity as csai-worker.
+  csai-media-worker:
+    image: fileengine-csai:${VERSION:-1.7.1}
+    depends_on:
+      core:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *csai-env
+    command: ["convert-search-ai-media-worker"]
     volumes:
       - servicetokens:/run/fileengine/tokens:ro
     restart: unless-stopped
@@ -1147,6 +1171,16 @@ services:
       SHARE_MONITORING_PORT: "8102"
       # The kill switch. Off unless a deployment opts in.
       SHARE_ENABLED: ${SHARE_ENABLED:-false}
+      # Media links (MEDIA_SHARE.md): kind 3 and the <tenant>-media.<base> door.
+      # Off by default; the same switch renders the nginx vhost. Open links are a
+      # separate, second decision.
+      SHARE_MEDIA_ENABLED: ${SHARE_MEDIA_ENABLED:-false}
+      SHARE_ALLOW_OPEN_MODE: ${SHARE_ALLOW_OPEN_MODE:-false}
+      SHARE_CSAI_URL: http://csai-app:8092
+      SHARE_MEDIA_BASE_URL: ${SHARE_MEDIA_BASE_URL:-}
+      # The share_service <-> CSAI internal seam, both directions (media-refs,
+      # republish). Must equal CSAI_INTERNAL_SECRET below.
+      SHARE_MEDIA_INTERNAL_SECRET: ${MEDIA_INTERNAL_SECRET:-}
       # Which LDAP group may mint links. Administrators pass regardless — an
       # invisible group gate reads as a broken build — and the admin roles are
       # STRIPPED from the identity used at redemption, so an admin's link
@@ -1326,6 +1360,7 @@ services:
     environment:
       BASE_DOMAIN: ${BASE_DOMAIN}
       TLS_MODE: ${TLS_MODE:-selfsigned}
+      MEDIA_ENABLED: ${SHARE_MEDIA_ENABLED:-false}
       HTTP_MAX_BODY_BYTES: ${HTTP_MAX_BODY_BYTES:-0}
       LE_EMAIL: ${LE_EMAIL:-}
       LE_STAGING: ${LE_STAGING:-false}
